@@ -1,3 +1,5 @@
+import datetime
+
 import chess
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
@@ -5,83 +7,10 @@ from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3.common.logger import configure
 from chess_env import ChessEnv  # Ensure you're importing the class correctly
 import torch
-from stockfish import Stockfish  # Assuming Stockfish is installed and available for move quality
-
-# Initialize Stockfish (optional for evaluating move quality)
-stockfish = Stockfish(path="stockfish/stockfish-windows-x86-64-avx2.exe")
-
 
 # Function to create chess environment
 def make_chess_env():
-    return ChessEnv(render_mode=None)  # No rendering during training for better efficiency
-
-
-# Function to calculate rewards based on custom evaluation metrics
-def evaluate_board(board, previous_board=None):
-    reward = 0
-    reward += evaluate_material(board)
-    reward += evaluate_piece_activity(board)
-    reward += evaluate_king_safety(board)
-
-    if previous_board:
-        reward += evaluate_move_quality(previous_board, board)  # Evaluate the quality of the move
-    reward += evaluate_game_result(board)  # Additional rewards for checkmate/draw results
-
-    return reward
-
-
-# Material advantage (assign values to pieces)
-def evaluate_material(board):
-    piece_values = {'P': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9}
-    reward = 0
-    for piece in board.pieces:
-        if piece.is_white():
-            reward += piece_values.get(piece.symbol().upper(), 0)
-        else:
-            reward -= piece_values.get(piece.symbol().upper(), 0)
-    return reward
-
-
-# Piece activity (reward for controlling center and moving pieces to active squares)
-def evaluate_piece_activity(board):
-    activity_reward = 0
-    center_squares = [(3, 3), (3, 4), (4, 3), (4, 4)]  # d4, e4, d5, e5
-    for piece in board.pieces:
-        if piece.position in center_squares:
-            activity_reward += 0.5  # Reward for central control
-    return activity_reward
-
-
-# King safety (reward for castling and keeping the king protected)
-def evaluate_king_safety(board):
-    king_safety = 0
-    if board.has_castled():
-        king_safety += 1  # Reward for castling
-    return king_safety
-
-
-# Move quality (compare the AI move to the best Stockfish move, optional)
-def evaluate_move_quality(previous_board, current_board):
-    stockfish.set_fen_position(previous_board.fen())
-    best_move = stockfish.get_best_move()
-    ai_move = current_board.last_move  # Assuming the ChessEnv class stores the last AI move
-    if ai_move == best_move:
-        return 1  # Perfect move
-    else:
-        return -1  # Sub-optimal move
-
-
-# Endgame result (reward for winning and penalize for losing)
-def evaluate_game_result(board):
-    if board.is_checkmate():
-        if board.turn == chess.WHITE:
-            return 10  # White wins
-        else:
-            return -10  # Black wins
-    elif board.is_stalemate() or board.is_draw():
-        return 0  # Neutral reward for draw or stalemate
-    return 0  # No terminal result
-
+    return ChessEnv()  # No rendering during training for better efficiency
 
 if __name__ == '__main__':  # Protect multiprocessing code on Windows
     num_envs = 4  # Number of parallel environments
@@ -123,7 +52,19 @@ if __name__ == '__main__':  # Protect multiprocessing code on Windows
 
     # Train the model with checkpoints and evaluation
     total_timesteps = 100000  # Increase total timesteps for better training
+    # total_timesteps = 1000000  # Increase total timesteps for better training ->1000000 for 0:20:54.877983
+    # total_timesteps = 17000000  # Increase total timesteps for better training -> 17000000 for 6:42:10.494444
+
+    start_time = datetime.datetime.now()
+
     model.learn(total_timesteps=total_timesteps, callback=[eval_callback, checkpoint_callback])
+
+    end_time = datetime.datetime.now()
+    duration = end_time - start_time
+
+    print("Start time: " + str(start_time))
+    print("End time: " + str(end_time))
+    print("For a total of " + str(total_timesteps) + " time steps, the model was trained with a duration of: " + str(duration))
 
     # Save the final model
     model.save("chess_model")
@@ -133,3 +74,13 @@ if __name__ == '__main__':  # Protect multiprocessing code on Windows
 
     # Load and play a game (rendering enabled for human-playable mode)
     vec_env = SubprocVecEnv([lambda: ChessEnv(render_mode=None)])  # Use 'human' mode for visual rendering
+
+
+
+# Recommendations:
+# 1. Tune Hyperparameters: Since rewards are fluctuating, it might help to:
+#  - Decrease the learning rate to encourage more stable learning in later stages.
+#  - Increase exploration by adjusting exploration-related parameters (e.g., epsilon decay for epsilon-greedy strategies).
+# 2. Longer Training: Training over more timesteps (e.g., up to 500,000 or even 1,000,000) might help the agent converge to a more stable policy and continue improving.
+# 3. Adjust Reward Structure: If the reward design focuses too much on intermediate moves rather than the endgame, you may want to adjust it to encourage better long-term strategy.
+# 4. Early Stopping: If you see rewards peaking around 240,000 timesteps and not improving afterward, you could implement early stopping or a checkpoint system to evaluate the best policy found so far.
