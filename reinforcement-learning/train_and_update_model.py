@@ -1,6 +1,7 @@
-import datetime
+import os
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
-import chess
+import datetime
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
@@ -24,8 +25,8 @@ if __name__ == '__main__':  # Protect multiprocessing code on Windows
         "MlpPolicy",
         vec_env,
         verbose=1,
-        n_steps=2048,  # Increase to consider longer sequences of steps
-        batch_size=64,  # Larger batch size for stable updates
+        n_steps=4096,  # Increase to consider longer sequences of steps
+        batch_size=1024,  # Larger batch size for stable updates
         learning_rate=3e-4,  # Default PPO learning rate
         device='cuda' if torch.cuda.is_available() else 'cpu'  # Use GPU if available
     )

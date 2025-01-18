@@ -1,6 +1,8 @@
+import os
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
 import pygame as p
 import chess_engine
-# import ai
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from chess_env import ChessEnv
@@ -224,7 +226,7 @@ if __name__ == '__main__':
             env.envs[0].set_state(game_state.board)
 
             obs = env.envs[0].get_observation()  # Get the 8x8 board matrix
-            # print(f"AI Observation:\n{obs}")
+            print(f"AI Observation:\n{obs}")
 
             # Predict the AI move using the PPO model
             action, _states = model.predict(obs, deterministic=True)
