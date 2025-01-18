@@ -221,20 +221,19 @@ if __name__ == '__main__':
 
         # AI move finder
         if not game_over and not human_turn:
-            # Get the current observation from the environment (AI's perspective)
-            obs = env.reset()
+            env.envs[0].set_state(game_state.board)
+
+            obs = env.envs[0].get_observation()  # Get the 8x8 board matrix
+            # print(f"AI Observation:\n{obs}")
 
             # Predict the AI move using the PPO model
             action, _states = model.predict(obs, deterministic=True)
 
-            # Convert the action to an integer if it's an array
-            action = int(action[0])  # Extract the first (and only) element from the action array
-
-            # Get the list of valid moves from the game state
+            # Get the list of valid moves
             valid_moves = game_state.get_valid_moves()
 
-            # Map the AI's action to the corresponding valid move
-            AI_move = valid_moves[action % len(valid_moves)]  # Ensure it's a valid move
+            # Map the AI's action to a valid move
+            AI_move = valid_moves[action % len(valid_moves)]  # Ensure action maps to a valid move
 
             # Make the AI's move
             game_state.make_move(AI_move)

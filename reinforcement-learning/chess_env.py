@@ -37,6 +37,29 @@ class ChessEnv(Env):
                 obs[i // 8][i % 8] = piece.piece_type
         return obs
 
+    def set_state(self, new_board):
+        """
+        Updates the internal board state of the environment.
+
+        Args:
+            new_board (list[list[str]]): The new board state represented as an 8x8 list of piece strings.
+                                         Each string represents a piece, e.g., 'wP' for white pawn, '--' for empty square.
+        """
+        import chess  # Ensure the `chess` library is imported
+
+        self.board = chess.Board()  # Reset the board
+        self.board.clear_board()  # Clear the board to start from a clean slate
+
+        # Recreate the board state
+        for row in range(8):
+            for col in range(8):
+                piece = new_board[row][col]
+                if piece != '--':  # If there's a piece, add it to the board
+                    piece_type = piece[1].lower()  # Convert to lowercase for compatibility with `python-chess`
+                    color = chess.WHITE if piece[0] == 'w' else chess.BLACK
+                    self.board.set_piece_at(row * 8 + col,
+                                            chess.Piece.from_symbol(piece_type.upper() if color else piece_type))
+
     def step(self, action):
         """Executes a move and returns the observation, reward, done, truncated, and info."""
         legal_moves = list(self.board.legal_moves)

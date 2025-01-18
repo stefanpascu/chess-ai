@@ -51,7 +51,7 @@ if __name__ == '__main__':  # Protect multiprocessing code on Windows
     )
 
     # Train the model with checkpoints and evaluation
-    total_timesteps = 100000  # Increase total timesteps for better training
+    total_timesteps = 10000  # Increase total timesteps for better training
     # total_timesteps = 1000000  # Increase total timesteps for better training ->1000000 for 0:20:54.877983
     # total_timesteps = 17000000  # Increase total timesteps for better training -> 17000000 for 6:42:10.494444
 
