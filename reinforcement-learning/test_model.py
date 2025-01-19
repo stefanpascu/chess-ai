@@ -5,13 +5,14 @@ import chess
 from stockfish import Stockfish
 from stable_baselines3 import PPO
 from chess_env import ChessEnv
+import settings
 
 # Initialize Stockfish as the intermediate opponent
 stockfish_path = "stockfish/stockfish-windows-x86-64-avx2.exe"  # Update with your Stockfish executable path
 stockfish = Stockfish(path=stockfish_path, parameters={"Skill Level": 1})  # Skill level 5 is intermediate
 
 # Load the trained PPO model
-model = PPO.load("chess_model")
+model = PPO.load(settings.model_file_path)
 
 # Initialize environment
 env = ChessEnv()

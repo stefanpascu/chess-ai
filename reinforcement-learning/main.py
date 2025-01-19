@@ -6,9 +6,11 @@ import chess_engine
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from chess_env import ChessEnv
+import numpy as np
+import settings
 
 # Load the trained PPO model
-model = PPO.load("chess_model")
+model = PPO.load(settings.model_file_path)
 
 # Initialize the Chess environment (for AI)
 env = DummyVecEnv([lambda: ChessEnv()])
@@ -225,8 +227,21 @@ if __name__ == '__main__':
         if not game_over and not human_turn:
             env.envs[0].set_state(game_state.board)
 
-            obs = env.envs[0].get_observation()  # Get the 8x8 board matrix
-            print(f"AI Observation:\n{obs}")
+            obs = env.envs[0].get_observation()
+            # debugging only
+            # piece_labels = [
+            #     "White Pawns", "White Knights", "White Bishops", "White Rooks",
+            #     "White Queens", "White Kings", "Black Pawns", "Black Knights",
+            #     "Black Bishops", "Black Rooks", "Black Queens", "Black Kings"
+            # ]
+            #
+            # for i, plane in enumerate(obs):
+            #     # Check if there are non-zero values in the plane
+            #     if plane.any():
+            #         if i < 6:  # First 6 planes are for white pieces
+            #             print(f"{piece_labels[i]} (1.0 values):\n{plane}\n")
+            #         else:  # Last 6 planes are for black pieces
+            #             print(f"{piece_labels[i]} (-1.0 values):\n{plane}\n")
 
             # Predict the AI move using the PPO model
             action, _states = model.predict(obs, deterministic=True)

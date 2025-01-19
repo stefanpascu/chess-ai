@@ -16,7 +16,7 @@ class ChessEnv(Env):
 
         # Define the action space and observation space
         self.action_space = spaces.Discrete(4672)  # Adjust for all possible chess moves
-        self.observation_space = spaces.Box(low=-1, high=1, shape=(8, 8), dtype=np.float32)
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(12, 8, 8), dtype=np.float64)
 
         # Store the render mode (e.g., 'human' for console printing, or others if needed)
         self.render_mode = render_mode
@@ -28,13 +28,42 @@ class ChessEnv(Env):
         self.previous_board = None
         return self.get_observation(), {}
 
+    def step(self, action):
+        """Executes a move and returns the observation, reward, done, truncated, and info."""
+        legal_moves = list(self.board.legal_moves)
+        move = legal_moves[action % len(legal_moves)]
+        self.board.push(move)
+
+        done = self.board.is_game_over()
+        reward = self.get_reward()
+
+        # Set truncated to False as it doesn't apply in chess
+        truncated = False
+
+        return self.get_observation(), reward, done, truncated, {}
+
     def get_observation(self):
-        """Converts the chess board state into an 8x8 numerical matrix."""
-        obs = np.zeros((8, 8))
+        """
+        Converts the chess board state into a (12, 8, 8) numerical tensor.
+        Each layer of the tensor represents a specific piece type:
+        0-5: White pieces (Pawns, Knights, Bishops, Rooks, Queens, Kings)
+        6-11: Black pieces (Pawns, Knights, Bishops, Rooks, Queens, Kings)
+        """
+        obs = np.zeros((12, 8, 8), dtype=np.float32)
+        piece_map = {
+            chess.PAWN: 0, chess.KNIGHT: 1, chess.BISHOP: 2,
+            chess.ROOK: 3, chess.QUEEN: 4, chess.KING: 5
+        }
+
         for i in range(64):
             piece = self.board.piece_at(i)
             if piece is not None:
-                obs[i // 8][i % 8] = piece.piece_type
+                row, col = divmod(i, 8)
+                layer = piece_map[piece.piece_type]
+                if piece.color == chess.BLACK:  # Black pieces offset by 6
+                    layer += 6
+                obs[layer, row, col] = 1.0 if piece.color == chess.WHITE else -1.0
+
         return obs
 
     def set_state(self, new_board):
@@ -59,20 +88,6 @@ class ChessEnv(Env):
                     color = chess.WHITE if piece[0] == 'w' else chess.BLACK
                     self.board.set_piece_at(row * 8 + col,
                                             chess.Piece.from_symbol(piece_type.upper() if color else piece_type))
-
-    def step(self, action):
-        """Executes a move and returns the observation, reward, done, truncated, and info."""
-        legal_moves = list(self.board.legal_moves)
-        move = legal_moves[action % len(legal_moves)]
-        self.board.push(move)
-
-        done = self.board.is_game_over()
-        reward = self.get_reward()
-
-        # Set truncated to False as it doesn't apply in chess
-        truncated = False
-
-        return self.get_observation(), reward, done, truncated, {}
 
     def get_reward(self):
         """Calculates the reward based on the current board state."""
