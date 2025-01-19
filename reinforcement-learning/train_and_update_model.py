@@ -6,22 +6,22 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3.common.logger import configure
-from chess_env import ChessEnv  # Ensure you're importing the class correctly
+from chess_env import ChessEnv
 import torch
 import settings
+import sys
 
-# Function to create chess environment
 def make_chess_env():
-    return ChessEnv()  # No rendering during training for better efficiency
+    return ChessEnv()
 
-if __name__ == '__main__':  # Protect multiprocessing code on Windows
-    num_envs = 4  # Number of parallel environments
+if __name__ == '__main__':
+    num_envs = 4
     vec_env = SubprocVecEnv([make_chess_env for _ in range(num_envs)])
-
-    # Normalize inputs to stabilize training
     vec_env = VecNormalize(vec_env)
 
-    # Check if a previously saved model exists
+    if os.path.exists("vec_normalize.pkl"):
+        vec_env = VecNormalize.load("vec_normalize.pkl", vec_env)
+
     if os.path.exists(settings.model_file_path):
         print(f"Loading and training existing model from {settings.model_file_path}")
         model = PPO.load(settings.model_file_path, env=vec_env, device='cuda' if torch.cuda.is_available() else 'cpu')
@@ -40,12 +40,11 @@ if __name__ == '__main__':  # Protect multiprocessing code on Windows
             )
         else:
             print("A new model was NOT created or trained because the user requested its cancellation.")
+            sys.exit(0)
 
-    # Configure logging for TensorBoard
     new_logger = configure("logs/", ["tensorboard"])
     model.set_logger(new_logger)
 
-    # Set up evaluation and checkpoint callbacks
     eval_callback = EvalCallback(
         vec_env,
         best_model_save_path='./logs/',
@@ -61,12 +60,14 @@ if __name__ == '__main__':  # Protect multiprocessing code on Windows
         name_prefix='chess_model_checkpoint'
     )
 
-    # Train the model with checkpoints and evaluation
-    total_timesteps = settings.training_number_of_timestamps  # Increase total timesteps for better training
+    total_timesteps = settings.training_number_of_timestamps
 
     start_time = datetime.datetime.now()
 
     model.learn(total_timesteps=total_timesteps, callback=[eval_callback, checkpoint_callback])
+
+    vec_env.save("vec_normalize.pkl")
+    model.save(settings.model_file_path)
 
     end_time = datetime.datetime.now()
     duration = end_time - start_time

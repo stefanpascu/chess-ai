@@ -105,71 +105,137 @@ class ChessEnv(Env):
 
     # Function to calculate rewards based on custom evaluation metrics
     def evaluate_board(self, current_board, previous_board=None):
+        """
+        Combines multiple evaluation functions to calculate the overall reward.
+        """
         reward = 0
         reward += self.evaluate_material()
         reward += self.evaluate_piece_activity()
         reward += self.evaluate_king_safety()
+        reward += self.evaluate_positional_advantage()
+        reward += self.evaluate_piece_coordination()
+        reward += self.evaluate_tempo()
 
         if previous_board:
-            reward += self.evaluate_move_quality(previous_board, current_board)  # Evaluate the quality of the move
-        reward += self.evaluate_game_result(current_board)  # Additional rewards for checkmate/draw results
+            reward += self.evaluate_move_quality(previous_board, current_board)
 
-        return reward
+        reward += self.evaluate_game_result(current_board)
 
-    # Material advantage (assign values to pieces)
+        return reward / 10  # Normalize rewards to avoid large fluctuations
+
     def evaluate_material(self):
-        piece_values = {'P': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9}
+        """
+        Evaluates material advantage.
+        Includes piece-square tables to enhance context.
+        """
+        piece_values = {'P': 1, 'N': 3.2, 'B': 3.3, 'R': 5, 'Q': 9}
+        piece_square_table = {
+            'P': [  # Pawns
+                [0, 0, 0, 0, 0, 0, 0, 0],
+                [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+                [0.1, 0.1, 0.2, 0.3, 0.3, 0.2, 0.1, 0.1],
+                [0.05, 0.05, 0.1, 0.275, 0.275, 0.1, 0.05, 0.05],
+                [0, 0, 0, 0.25, 0.25, 0, 0, 0],
+                [0.05, -0.05, -0.1, 0, 0, -0.1, -0.05, 0.05],
+                [0.05, 0.1, 0.1, -0.2, -0.2, 0.1, 0.1, 0.05],
+                [0, 0, 0, 0, 0, 0, 0, 0],
+            ],
+            # Similar tables can be added for other pieces: 'N', 'B', 'R', 'Q', and 'K'
+        }
+
         reward = 0
         for i in range(64):
             piece = self.board.piece_at(i)
             if piece is not None:
+                value = piece_values.get(piece.symbol().upper(), 0)
+                row, col = divmod(i, 8)
                 if piece.color == chess.WHITE:
-                    reward += piece_values.get(piece.piece_type, 0)
+                    reward += value + piece_square_table.get(piece.symbol().upper(), [[0] * 8] * 8)[row][col]
                 else:
-                    reward -= piece_values.get(piece.piece_type, 0)
+                    reward -= value + piece_square_table.get(piece.symbol().upper(), [[0] * 8] * 8)[7 - row][col]
         return reward
 
-    # Piece activity (reward for controlling center and moving pieces to active squares)
     def evaluate_piece_activity(self):
+        """
+        Evaluates piece activity by rewarding mobility and central control.
+        """
         activity_reward = 0
-        center_squares = {chess.square(3, 3), chess.square(3, 4), chess.square(4, 3), chess.square(4, 4)}  # d4, e4, d5, e5
+        center_squares = {chess.D4, chess.E4, chess.D5, chess.E5}
         for square, piece in self.board.piece_map().items():
+            legal_moves = list(self.board.legal_moves)
+            activity_reward += 0.1 * len(legal_moves)  # Reward mobility
             if square in center_squares:
-                activity_reward += 0.5  # Reward for central control
+                activity_reward += 0.5  # Reward central control
         return activity_reward
 
-    # King safety (reward for castling and keeping the king protected)
     def evaluate_king_safety(self):
-        king_square = self.board.king(chess.WHITE)  # Get the position of the white king
-        rook_squares = [chess.A1, chess.H1]  # Original positions of rooks for white
-        castled = False
+        """
+        Evaluates king safety based on castling and exposure.
+        """
+        reward = 0
+        for color in [chess.WHITE, chess.BLACK]:
+            king_square = self.board.king(color)
+            if king_square:
+                if king_square in [chess.G1, chess.C1, chess.G8, chess.C8]:  # Castled positions
+                    reward += 1 if color == chess.WHITE else -1
+                else:
+                    adjacent_squares = list(self.board.attacks(king_square))
+                    for square in adjacent_squares:
+                        if not self.board.is_attacked_by(not color, square):
+                            reward += 0.1 if color == chess.WHITE else -0.1
+        return reward
 
-        # Check for white castling
-        if king_square in (chess.C1, chess.G1):  # Kingside or queenside castling
-            castled = True
+    def evaluate_positional_advantage(self):
+        """
+        Evaluates positional advantages like outposts and open files.
+        """
+        reward = 0
+        open_files = [i for i in range(8) if all(self.board.piece_at(chess.square(i, j)) is None for j in range(8))]
+        for square, piece in self.board.piece_map().items():
+            if piece.symbol().upper() == 'R' and chess.square_file(square) in open_files:
+                reward += 0.5 if piece.color == chess.WHITE else -0.5  # Rook on open file
+        return reward
 
-        # Check for black king
-        king_square_black = self.board.king(chess.BLACK)  # Get the position of the black king
-        rook_squares_black = [chess.A8, chess.H8]  # Original positions of rooks for black
+    def evaluate_piece_coordination(self):
+        """
+        Evaluates piece coordination (support between pieces).
+        """
+        reward = 0
+        for square, piece in self.board.piece_map().items():
+            for attack in self.board.attacks(square):
+                if self.board.piece_at(attack) and self.board.piece_at(attack).color == piece.color:
+                    reward += 0.1 if piece.color == chess.WHITE else -0.1
+        return reward
 
-        # Check for black castling
-        if king_square_black in (chess.C8, chess.G8):  # Kingside or queenside castling
-            castled = True
+    def evaluate_tempo(self):
+        """
+        Rewards quick development of pieces.
+        """
+        reward = 0
+        developed_pieces = 0
+        for i in range(64):
+            piece = self.board.piece_at(i)
+            if piece and piece.color == chess.WHITE and i in range(16, 48):  # Developed zone
+                developed_pieces += 1
+        reward += 0.2 * developed_pieces  # Reward based on number of developed pieces
+        return reward
 
-        return 1 if castled else 0  # Reward for castling
-
-    # Move quality (compare the AI move to the best Stockfish move, optional)
-    def evaluate_move_quality(previous_board, current_board):
+    def evaluate_move_quality(self, previous_board, current_board):
+        """
+        Compares AI move to Stockfish's best move (optional).
+        """
         stockfish.set_fen_position(previous_board.fen())
         best_move = stockfish.get_best_move()
-        ai_move = current_board.last_move  # Assuming the ChessEnv class stores the last AI move
+        ai_move = current_board.last_move
         if ai_move == best_move:
             return 1  # Perfect move
         else:
             return -1  # Sub-optimal move
 
-    # Endgame result (reward for winning and penalize for losing)
     def evaluate_game_result(self, board):
+        """
+        Evaluates the game result.
+        """
         if self.board.is_checkmate():
             if self.board.turn == chess.WHITE:
                 return -10  # Black wins
@@ -178,3 +244,4 @@ class ChessEnv(Env):
         elif self.board.is_stalemate() or self.board.is_insufficient_material() or self.board.can_claim_fifty_moves():
             return 0  # Draw
         return 0  # No terminal result
+
