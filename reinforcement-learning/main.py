@@ -10,7 +10,7 @@ import numpy as np
 import settings
 
 # Load the trained PPO model
-model = PPO.load(settings.model_file_path)
+model = PPO.load(settings.reinforced_model_path)
 
 # Initialize the Chess environment (for AI)
 env = DummyVecEnv([lambda: ChessEnv()])

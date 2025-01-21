@@ -12,7 +12,12 @@ stockfish_path = "stockfish/stockfish-windows-x86-64-avx2.exe"  # Update with yo
 stockfish = Stockfish(path=stockfish_path, parameters={"Skill Level": 1})  # Skill level 5 is intermediate
 
 # Load the trained PPO model
-model = PPO.load(settings.model_file_path)
+model_1 = PPO.load(settings.reinforced_model_path)
+
+model_2 = PPO.load("logs/best_pretrained_chess_model_21-01-2025.zip")
+
+player_1 = model_1
+player_2 = model_2
 
 # Initialize environment
 env = ChessEnv()
@@ -27,16 +32,22 @@ def evaluate_model_against_stockfish(num_games=10):
         while not board.is_game_over():
             if board.turn:  # White's turn (your AI)
                 obs = env.get_observation()  # Get observation
-                action, _ = model.predict(obs, deterministic=True)  # AI move
+                action, _ = player_1.predict(obs, deterministic=True)  # AI move
                 legal_moves = list(board.legal_moves)
                 move = legal_moves[action % len(legal_moves)]  # Ensure valid move
                 board.push(move)
                 env.board = board  # Sync environment with board state
             else:  # Black's turn (Stockfish)
-                stockfish.set_fen_position(board.fen())
-                stockfish_move = stockfish.get_best_move()
-                if stockfish_move:
-                    board.push(chess.Move.from_uci(stockfish_move))
+                bs = env.get_observation()  # Get observation
+                action, _ = player_2.predict(obs, deterministic=True)  # AI move
+                legal_moves = list(board.legal_moves)
+                move = legal_moves[action % len(legal_moves)]  # Ensure valid move
+                board.push(move)
+                env.board = board  # Sync environment with board state
+                # stockfish.set_fen_position(board.fen())
+                # stockfish_move = stockfish.get_best_move()
+                # if stockfish_move:
+                #     board.push(chess.Move.from_uci(stockfish_move))
 
             # print(board)
 
