@@ -72,7 +72,7 @@ def parse_pgn_to_dataset(pgn_file, output_file, max_games):
                 out.write(f"{fen},{move.uci()}\n")
                 board.push(move)
             game_count += 1
-            if game_count % 1000 == 0:
+            if game_count % (max_games // 100) == 0:
                 print(f"\rProcessed {game_count}/{settings.max_games_for_pretraining} games", end="")
     print(f"Finished processing {game_count} games. Dataset saved to {output_file}")
 
@@ -161,9 +161,10 @@ def main():
     stockfish_path = settings.stockfish_path
     policy_kwargs = {
         "features_extractor_class": train_model.CustomCNN,
-        "features_extractor_kwargs": {"features_dim": 256},  # Size of the final feature vector
-        "normalize_images": False  # Already normalized in the environment
+        "features_extractor_kwargs": {"features_dim": 768},  # Adjust this if needed
+        "normalize_images": False
     }
+
     if is_stockfish == "yes":
         print(f"Stockfish enabled.")
     else:

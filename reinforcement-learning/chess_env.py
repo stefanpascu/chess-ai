@@ -1,6 +1,6 @@
 import chess
 import numpy as np
-from dill import settings
+import settings
 from gymnasium import Env
 from gymnasium import spaces
 from stockfish import Stockfish  # Assuming Stockfish is installed and available for move quality
@@ -15,41 +15,35 @@ class ChessEnv(Env):
         self.board = chess.Board()
         self.previous_board = None
 
-        # Define the action space and observation space
-        self.action_space = spaces.Discrete(4672)  # Adjust for all possible chess moves
-        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(12, 8, 8), dtype=np.float64)
+        # Observation space for NatureCNN (12 channels, 8x8 board)
+        self.observation_space = spaces.Box(
+            low=0.0, high=1.0, shape=(12, 8, 8), dtype=np.float32
+        )
 
-        # Store the render mode (e.g., 'human' for console printing, or others if needed)
+        # Action space for discrete moves
+        self.action_space = spaces.Discrete(4672)
+
         self.render_mode = render_mode
 
     def reset(self, seed=None, options=None):
-        """Resets the environment to an initial state and returns an initial observation."""
         super().reset(seed=seed)
         self.board.reset()
         self.previous_board = None
         return self.get_observation(), {}
 
     def step(self, action):
-        """Executes a move and returns the observation, reward, done, truncated, and info."""
         legal_moves = list(self.board.legal_moves)
         move = legal_moves[action % len(legal_moves)]
+        self.previous_board = self.board.copy()
         self.board.push(move)
 
         done = self.board.is_game_over()
         reward = self.get_reward()
+        info = {"episode": {"r": reward, "l": len(self.board.move_stack)}} if done else {}
 
-        # Set truncated to False as it doesn't apply in chess
-        truncated = False
-
-        return self.get_observation(), reward, done, truncated, {}
+        return self.get_observation(), reward, done, False, info
 
     def get_observation(self):
-        """
-        Converts the chess board state into a (12, 8, 8) numerical tensor.
-        Each layer of the tensor represents a specific piece type:
-        0-5: White pieces (Pawns, Knights, Bishops, Rooks, Queens, Kings)
-        6-11: Black pieces (Pawns, Knights, Bishops, Rooks, Queens, Kings)
-        """
         obs = np.zeros((12, 8, 8), dtype=np.float32)
         piece_map = {
             chess.PAWN: 0, chess.KNIGHT: 1, chess.BISHOP: 2,
@@ -61,11 +55,18 @@ class ChessEnv(Env):
             if piece is not None:
                 row, col = divmod(i, 8)
                 layer = piece_map[piece.piece_type]
-                if piece.color == chess.BLACK:  # Black pieces offset by 6
+                if piece.color == chess.BLACK:
                     layer += 6
-                obs[layer, row, col] = 1.0 if piece.color == chess.WHITE else -1.0
+                obs[layer, row, col] = 1.0
 
         return obs
+
+    def render(self, mode='human'):
+        """Renders the current board state."""
+        if mode == 'human':
+            print(self.board)
+        else:
+            pass  # Extend for other render modes if needed
 
     def set_state(self, new_board):
         """
@@ -75,8 +76,6 @@ class ChessEnv(Env):
             new_board (list[list[str]]): The new board state represented as an 8x8 list of piece strings.
                                          Each string represents a piece, e.g., 'wP' for white pawn, '--' for empty square.
         """
-        import chess  # Ensure the `chess` library is imported
-
         self.board = chess.Board()  # Reset the board
         self.board.clear_board()  # Clear the board to start from a clean slate
 
@@ -90,19 +89,64 @@ class ChessEnv(Env):
                     self.board.set_piece_at(row * 8 + col,
                                             chess.Piece.from_symbol(piece_type.upper() if color else piece_type))
 
+
     def get_reward(self):
         """Calculates the reward based on the current board state."""
-        # Use evaluate_board to calculate the reward
         reward = self.evaluate_board(self.board, self.previous_board)
+
+        # Evaluate trade if the last move involved a capture
+        if self.board.move_stack:
+            last_move = self.board.move_stack[-1]
+            reward += self.evaluate_trade(last_move)
+
+        if not np.isfinite(reward):
+            print(f"Invalid reward detected: {reward}. Resetting to 0.")
+            reward = 0
+
         return reward
 
-    def render(self, mode='human'):
-        """Renders the current board state."""
-        if mode == 'human':
-            print(self.board)  # Print the board to console
-        else:
-            # You could extend this to support other render modes (like 'rgb_array')
-            pass
+
+    def evaluate_trade(self, move):
+        """
+        Evaluates whether a trade is favorable based on piece values and protection.
+
+        Args:
+            move (chess.Move): The move to evaluate.
+
+        Returns:
+            float: Positive value for favorable trades, negative for unfavorable trades, 0 for neutral.
+        """
+        piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
+
+        # Get the pieces involved in the trade
+        moving_piece = self.board.piece_at(move.from_square)
+        captured_piece = self.board.piece_at(move.to_square)
+
+        if not moving_piece:
+            return 0  # No piece is being moved (shouldn't happen with valid moves)
+
+        # If there's no captured piece, it's not a trade
+        if not captured_piece:
+            return 0
+
+        # Evaluate the trade
+        moving_piece_value = piece_values.get(moving_piece.piece_type, 0)
+        captured_piece_value = piece_values.get(captured_piece.piece_type, 0)
+
+        # Check if the captured piece is protected
+        is_captured_piece_protected = any(
+            self.board.piece_at(attacker) and
+            self.board.piece_at(attacker).color != captured_piece.color
+            for attacker in self.board.attackers(not captured_piece.color, move.to_square)
+        )
+
+        # Reward or penalize based on the trade
+        trade_value = captured_piece_value - moving_piece_value
+        if is_captured_piece_protected:
+            trade_value -= moving_piece_value  # Account for losing the moving piece after the trade
+
+        return trade_value
+
 
     def evaluate_board(self, current_board, previous_board=None):
         """
@@ -116,8 +160,8 @@ class ChessEnv(Env):
         reward += self.evaluate_tempo()
         reward += self.evaluate_center_control()  # Add center control evaluation
 
-        if previous_board:
-            reward += self.evaluate_move_quality(previous_board, current_board)
+        # if previous_board:
+        #     reward += self.evaluate_move_quality(previous_board, current_board)
 
         reward += self.evaluate_game_result(current_board)
 
@@ -189,7 +233,6 @@ class ChessEnv(Env):
                 [0.2, 0.2, 0, 0, 0, 0, 0.2, 0.2],
                 [0.2, 0.3, 0.1, 0, 0, 0.1, 0.3, 0.2],
             ],
-            # Add tables for 'B', 'R', 'Q', and 'K' similarly
         }
 
         reward = 0
@@ -331,23 +374,33 @@ class ChessEnv(Env):
         pawn_color = chess.WHITE if color == chess.WHITE else chess.BLACK
         opponent_color = not pawn_color
 
+        # Define pawn movement directions
+        forward_left = square + (-9 if pawn_color == chess.WHITE else 7)
+        forward_right = square + (-7 if pawn_color == chess.WHITE else 9)
+
         # Check if the square is protected by a pawn
-        pawns_protecting = [square + direction for direction in (-7, -9) if pawn_color == chess.WHITE] + \
-                           [square + direction for direction in (7, 9) if pawn_color == chess.BLACK]
+        pawns_protecting = [forward_left, forward_right]
         is_protected = any(
+            0 <= sq < 64 and
             self.board.piece_at(sq) and self.board.piece_at(sq).symbol().upper() == 'P' and
-            self.board.piece_at(sq).color == color for sq in pawns_protecting
+            self.board.piece_at(sq).color == color
+            for sq in pawns_protecting
         )
 
         # Check if the square cannot be attacked by enemy pawns
-        opponent_pawns_threatening = [square + direction for direction in (7, 9) if pawn_color == chess.WHITE] + \
-                                     [square + direction for direction in (-7, -9) if pawn_color == chess.BLACK]
+        backward_left = square + (7 if pawn_color == chess.WHITE else -9)
+        backward_right = square + (9 if pawn_color == chess.WHITE else -7)
+        opponent_pawns_threatening = [backward_left, backward_right]
         is_safe = all(
-            not self.board.piece_at(sq) or self.board.piece_at(sq).symbol().upper() != 'P' or
-            self.board.piece_at(sq).color != opponent_color for sq in opponent_pawns_threatening
+            not (0 <= sq < 64 and
+                 self.board.piece_at(sq) and
+                 self.board.piece_at(sq).symbol().upper() == 'P' and
+                 self.board.piece_at(sq).color == opponent_color)
+            for sq in opponent_pawns_threatening
         )
 
         return is_protected and is_safe
+
 
     def evaluate_piece_coordination(self):
         """
@@ -435,6 +488,8 @@ class ChessEnv(Env):
         based on evaluation scores.
         """
         # Set Stockfish to the previous board state
+        stockfish.set_depth(5)
+        stockfish.update_engine_parameters({"Threads": 1, "Hash": 128})
         stockfish.set_fen_position(previous_board.fen())
 
         # Get Stockfish's evaluation score before the AI move
@@ -473,10 +528,10 @@ class ChessEnv(Env):
         move_count = len(self.board.move_stack)  # Count the number of moves played so far
 
         # Define base rewards
-        win_base_reward = 10
+        win_base_reward = 7
         loss_base_reward = -10
-        max_moves = 100  # Assumed maximum number of moves for a normal game
-        early_win_bonus = max_moves - move_count  # The fewer the moves, the higher the bonus
+        max_moves = 40  # Assumed maximum number of moves for a normal game
+        early_win_bonus = (max_moves - move_count)/10  # The fewer the moves, the higher the bonus
 
         if self.board.is_checkmate():
             if self.board.turn == chess.WHITE:
