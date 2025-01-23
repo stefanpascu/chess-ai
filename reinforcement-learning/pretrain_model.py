@@ -10,8 +10,8 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv
-from gym import spaces
-import gym
+from gymnasium import spaces
+from gymnasium import Env
 import settings
 import datetime
 import train_and_update_model as train_model
@@ -37,8 +37,12 @@ class ChessDataset(Dataset):
         fen, move = self.data[idx]
         observation = self.fen_to_observation(fen)
         action = self.uci_to_action(move)
-        # Ensure observation is a tensor and action is directly converted
-        return torch.tensor(observation, dtype=torch.float32), torch.tensor(action, dtype=torch.long)
+        # Ensure observation and action are tensors
+        if not isinstance(observation, torch.Tensor):
+            observation = torch.tensor(observation, dtype=torch.float32)
+        if not isinstance(action, torch.Tensor):
+            action = torch.tensor(action, dtype=torch.long)
+        return observation, action
 
     def fen_to_observation(self, fen):
         # Convert FEN to a tensor-based observation (12x8x8 format)
@@ -140,7 +144,7 @@ def pretrain_model_with_entropy_and_stochastic_sampling(
         print(f"Epoch {epoch + 1}/{epochs} completed in {epoch_time:.2f}s. Avg Loss: {total_loss / len(dataloader):.4f}")
 
 
-class DummyChessEnv(gym.Env):
+class DummyChessEnv(Env):
     def __init__(self):
         super(DummyChessEnv, self).__init__()
         self.observation_space = spaces.Box(low=0, high=1, shape=(12, 8, 8), dtype=float)
@@ -170,7 +174,7 @@ def main():
     else:
         print(f"Stockfish disabled.")
 
-    user_input = input("Do you want to parse the PGN file? (yes/no): ").strip().lower()
+    user_input = input("\nDo you want to parse the PGN file? (yes/no): ").strip().lower()
     if user_input == "yes":
         start_time = datetime.datetime.now()
         print(f"Extracting data from {pgn_file}...")
@@ -193,7 +197,7 @@ def main():
     vec_env = VecNormalize(dummy_env)
 
     user_input = input(
-        "PRETRAINING the model will DELETE its current version. \nDo you want to continue? (yes/no): ").strip().lower()
+        "\nPRETRAINING the model will DELETE its current version. \nDo you want to continue? (yes/no): ").strip().lower()
     if user_input == "yes":
         # Pretrain the model
         start_time = datetime.datetime.now()

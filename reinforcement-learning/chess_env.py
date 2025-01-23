@@ -17,7 +17,7 @@ class ChessEnv(Env):
 
         # Observation space for NatureCNN (12 channels, 8x8 board)
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(12, 8, 8), dtype=np.float32
+            low=0.0, high=1.0, shape=(12, 8, 8), dtype=np.float64
         )
 
         # Action space for discrete moves

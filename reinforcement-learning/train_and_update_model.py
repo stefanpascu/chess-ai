@@ -9,10 +9,9 @@ from stable_baselines3.common.logger import configure
 from chess_env import ChessEnv
 import torch
 import settings
-import sys
 import torch.nn as nn
 from stable_baselines3.common.callbacks import BaseCallback
-import numpy as np
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 
@@ -40,29 +39,6 @@ class CustomCNN(BaseFeaturesExtractor):
         return self.fc(self.cnn(observations))
 
 
-class TrainingLoggerCallback(BaseCallback):
-    def __init__(self, log_interval=settings.training_number_of_timestamps//100, verbose=0):
-        super().__init__(verbose)
-        self.log_interval = log_interval
-        self.episode_counter = 0
-
-    def _on_step(self) -> bool:
-        # Check if episode information is available
-        if len(self.model.ep_info_buffer) > 0:
-            # Increment the episode counter
-            self.episode_counter += 1
-
-            # Log every 'log_interval' episodes
-            if self.episode_counter % self.log_interval == 0:
-                # Calculate the average reward over the episodes
-                avg_reward = np.mean([ep_info["r"] for ep_info in self.model.ep_info_buffer])
-                if np.isfinite(avg_reward):
-                    print(f"Episode: {self.episode_counter}, Avg Reward: {avg_reward:.2f}")
-                else:
-                    print(f"Episode: {self.episode_counter}, Avg Reward: NaN (invalid rewards in buffer)")
-        return True
-
-
 # Define Entropy Decay Callback
 class EntropyDecayCallback(BaseCallback):
     def __init__(self, initial_entropy_coef, final_entropy_coef, total_timesteps, verbose=1):
@@ -70,7 +46,6 @@ class EntropyDecayCallback(BaseCallback):
         self.initial_entropy_coef = initial_entropy_coef
         self.final_entropy_coef = final_entropy_coef
         self.total_timesteps = total_timesteps
-
 
     def _on_step(self) -> bool:
         # Calculate the new entropy coefficient based on training progress
@@ -82,18 +57,16 @@ class EntropyDecayCallback(BaseCallback):
         self.model.ent_coef = new_entropy_coef
         return True
 
-
 # Environment setup
 def make_chess_env():
-    return ChessEnv()
+    env = ChessEnv()
+    env = Monitor(env)
+    return env
 
-
-def transfer_pretrained_weights_to_rl(pretrained_model_path, rl_model, vec_env, normalize_stats_path):
+# Function to transfer weights from a pretrained model
+def transfer_pretrained_weights(pretrained_model_path, rl_model):
     print(f"Loading pretrained model from {pretrained_model_path}...")
-
-    # Load the pretrained model
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    pretrained_model = PPO.load(pretrained_model_path, device=device)
+    pretrained_model = PPO.load(pretrained_model_path, device='cuda' if torch.cuda.is_available() else 'cpu')
 
     # Selectively transfer compatible weights
     pretrained_state = pretrained_model.policy.state_dict()
@@ -101,100 +74,68 @@ def transfer_pretrained_weights_to_rl(pretrained_model_path, rl_model, vec_env, 
     compatible_state = {k: v for k, v in pretrained_state.items() if k in rl_state and v.size() == rl_state[k].size()}
     rl_state.update(compatible_state)
     rl_model.policy.load_state_dict(rl_state)
-    print(f"Transferred {len(compatible_state)}/{len(pretrained_state)} layers from pretrained model to RL model.")
-
-    # Ensure VecNormalize stats are consistent
-    if os.path.exists(normalize_stats_path):
-        print(f"Loading VecNormalize stats from {normalize_stats_path}...")
-        vec_env = VecNormalize.load(normalize_stats_path, vec_env)
-        vec_env.training = True  # Enable training mode
-        vec_env.norm_reward = True  # Normalize rewards
-        print("VecNormalize stats loaded and environment updated.")
-    else:
-        print("No VecNormalize stats found. Continuing with a new environment.")
-
-    return vec_env
-
+    print(f"Transferred {len(compatible_state)}/{len(pretrained_state)} layers from the pretrained model.")
 
 if __name__ == '__main__':
     num_envs = 4
     vec_env = SubprocVecEnv([make_chess_env for _ in range(num_envs)])
     vec_env = VecNormalize(vec_env)
+
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    policy = "CnnPolicy" # "MlpPolicy"
+
     policy_kwargs = {
         "features_extractor_class": CustomCNN,
-        "features_extractor_kwargs": {"features_dim": 768},  # Adjust this if needed
+        "features_extractor_kwargs": {"features_dim": 768},
         "normalize_images": False
     }
 
-    # Load existing VecNormalize stats if available
-    if os.path.exists(settings.normalized_env_path):
-        vec_env = VecNormalize.load(settings.normalized_env_path, vec_env)
+    pretrained_model_path = settings.pretrained_model_path  # Path to pretrained model
+    reinforced_model_path = settings.reinforced_model_path  # Path to RL model
+    total_timesteps = settings.training_number_of_timestamps
 
-    # Load or initialize the model
-    pretrained_model_path = settings.pretrained_model_path  # Path to the pretrained model
-    if os.path.exists(settings.reinforced_model_path):
-        print(f"Loading and training existing reinforcement learning model from {settings.reinforced_model_path}")
-        model = PPO.load(settings.reinforced_model_path, env=vec_env, verbose=1, device=device)
+    if os.path.exists(reinforced_model_path):
+        print(f"Loading and training existing RL model from {reinforced_model_path}...")
+        model = PPO.load(reinforced_model_path, env=vec_env, device=device, verbose=1)
     else:
-        user_input = input(f"\nReinforcement learning model from {settings.reinforced_model_path} was not found. \nDo you want to load and train pretrained model? (yes/no): ").strip().lower()
-        if user_input == "yes":
-            if os.path.exists(pretrained_model_path):
-                print(f"Loading and training existing pretrained model from {pretrained_model_path}...")
-                model = PPO.load(settings.pretrained_model_path, env=vec_env, verbose=1,
-                                 device=device)
-
-            else:
-                user_input = input("\nNo existing model found. \nDo you want to create a new model? (yes/no): ").strip().lower()
-                if user_input == "yes":
-                    print("Creating and training new model...")
-                    model = PPO(
-                        policy,
-                        vec_env,
-                        verbose=1,
-                        n_steps=4096,
-                        batch_size=1024,
-                        learning_rate=1e-4,  # Initial learning rate
-                        ent_coef=0.01,  # Initial entropy coefficient
-                        device=device,
-                        policy_kwargs=policy_kwargs
-                    )
-
-                else:
-                    print("Model creation was cancelled.")
-                    sys.exit(0)
+        user_input = input(f"RL model not found at {reinforced_model_path}. Load pretrained model? (yes/no): ").strip().lower()
+        if user_input == "yes" and os.path.exists(pretrained_model_path):
+            print("Initializing RL model from pretrained model...")
+            model = PPO(
+                "CnnPolicy",
+                vec_env,
+                policy_kwargs=policy_kwargs,
+                verbose=1,
+                n_steps=4096,
+                batch_size=1024,
+                learning_rate=1e-4,
+                ent_coef=0.01,
+                device=device
+            )
+            transfer_pretrained_weights(pretrained_model_path, model)
         else:
-            user_input = input(
-                "\nDo you want to create a new model? (yes/no): ").strip().lower()
-            if user_input == "yes":
-                print("Creating and training new model...")
-                model = PPO(
-                    policy,
-                    vec_env,
-                    verbose=1,
-                    n_steps=4096,
-                    batch_size=1024,
-                    learning_rate=1e-4,  # Initial learning rate
-                    ent_coef=0.01,  # Initial entropy coefficient
-                    device=device,
-                    policy_kwargs=policy_kwargs
-                )
-            else:
-                print("Model creation was cancelled.")
-                sys.exit(0)
+            print("Creating a new RL model...")
+            model = PPO(
+                "CnnPolicy",
+                vec_env,
+                policy_kwargs=policy_kwargs,
+                verbose=1,
+                n_steps=4096,
+                batch_size=1024,
+                learning_rate=1e-4,
+                ent_coef=0.01,
+                device=device
+            )
 
     # Configure logger
-    new_logger = configure("logs/", ["tensorboard"])
-    model.set_logger(new_logger)
+    logger = configure("logs/", ["tensorboard"])
+    model.set_logger(logger)
 
     # Define callbacks
     entropy_decay_callback = EntropyDecayCallback(
         initial_entropy_coef=0.01,
         final_entropy_coef=0.001,  # Lower entropy for exploitation
-        total_timesteps=settings.training_number_of_timestamps,
+        total_timesteps=total_timesteps,
     )
-
     eval_callback = EvalCallback(
         vec_env,
         best_model_save_path='./logs/',
@@ -203,30 +144,20 @@ if __name__ == '__main__':
         deterministic=True,
         render=False,
     )
-
     checkpoint_callback = CheckpointCallback(
         save_freq=100000,
         save_path='./logs/',
         name_prefix='chess_model_checkpoint',
     )
 
-    total_timesteps = settings.training_number_of_timestamps
-
+    # Start training
     start_time = datetime.datetime.now()
-    print("Start time: " + str(start_time))
-
-    # Train the model with callbacks
+    print(f"Training started at {start_time}...")
     model.learn(total_timesteps=total_timesteps, callback=[entropy_decay_callback, eval_callback, checkpoint_callback])
 
-    # Save VecNormalize stats and the model
+    # Save the model and VecNormalize stats
     vec_env.save(settings.normalized_env_path)
-    model.save(settings.reinforced_model_path)
+    model.save(reinforced_model_path)
 
     end_time = datetime.datetime.now()
-    duration = end_time - start_time
-
-    print("End time: " + str(end_time))
-    print("For a total of " + str(total_timesteps) + " time steps, the model was trained with a duration of: " + str(duration))
-
-    # Save the final model
-    model.save(settings.reinforced_model_path)
+    print(f"Training completed at {end_time}. \nDuration: {end_time - start_time}")
