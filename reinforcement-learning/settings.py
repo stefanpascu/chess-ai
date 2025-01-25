@@ -9,10 +9,11 @@ stockfish_path = "stockfish/stockfish-windows-x86-64-avx2.exe"
 normalized_env_path = "logs/vec_normalize.pkl"
 
 # pretraining variables
-max_games_for_pretraining = 2_048
+max_games_for_pretraining = 2**11
+epochs_for_pretraining = 5
 
 # training variables
-training_number_of_timestamps = 65_536
+training_number_of_timestamps = 2**18
 
 
 # will only use for demonstration of optimization and data collection

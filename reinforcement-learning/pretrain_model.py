@@ -16,6 +16,8 @@ import settings
 import datetime
 import train_and_update_model as train_model
 import stockfish_for_pretraining
+import numpy as np
+from chess_env import ChessEnv
 
 
 class ChessDataset(Dataset):
@@ -84,9 +86,6 @@ def parse_pgn_to_dataset(pgn_file, output_file, max_games):
 def pretrain_model_with_entropy_and_stochastic_sampling(
     model, dataset, epochs=10, batch_size=64, lr=1e-3, entropy_coef=0.01, temperature=1.0, num_workers=0
 ):
-    """
-    Pretrain the model with Stockfish evaluation, entropy regularization, and stochastic action sampling.
-    """
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -98,6 +97,9 @@ def pretrain_model_with_entropy_and_stochastic_sampling(
     optimizer = optim.Adam(model.policy.parameters(), lr=lr)
     device = next(model.policy.parameters()).device
 
+    # Initialize a dummy ChessEnv for reward calculation
+    chess_env = ChessEnv(reward_scaling_factor=1.0)
+
     for epoch in range(epochs):
         initial_temperature = temperature
         final_temperature = temperature / 10
@@ -105,12 +107,10 @@ def pretrain_model_with_entropy_and_stochastic_sampling(
 
         print(f"Starting epoch {epoch + 1}/{epochs}...")
         epoch_start_time = time.time()
-        batch_start_time = time.time()
         total_loss = 0
-        batch_id = 0
+        batch_rewards = []  # Store rewards for logging
 
-        print(f"\rBatches 0/{len(dataloader)}", end="")
-        for obs, actions in dataloader:
+        for batch_id, (obs, actions) in enumerate(dataloader):
             obs = obs.to(device, non_blocking=True).view(obs.size(0), -1)  # Flatten observations
             actions = actions.to(device, non_blocking=True).long()
 
@@ -120,28 +120,45 @@ def pretrain_model_with_entropy_and_stochastic_sampling(
             logits = model.policy.action_net(policy_features)
 
             # Stochastic action sampling
-            sampled_actions = stockfish_for_pretraining.sample_stochastic_action(logits, temperature=temperature)
+            sampled_actions = torch.multinomial(
+                torch.softmax(logits / temperature, dim=-1), 1
+            ).view(-1)
 
             # Calculate losses
             move_loss = criterion_move(logits, actions)
-            sampled_actions_loss = criterion_move(logits, sampled_actions.view(-1))
             entropy_loss = -entropy_coef * (logits.softmax(dim=-1) * logits.log_softmax(dim=-1)).sum(dim=-1).mean()
 
-            loss = move_loss + 0.1 * sampled_actions_loss + entropy_loss
+            loss = move_loss + entropy_loss
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
 
-            if (batch_id + 1) % (settings.max_games_for_pretraining//100) == 0:
-                batch_time = time.time() - batch_start_time
-                print(f"\rBatches {batch_id + 1}/{len(dataloader)} processed in {batch_time:.2f}s - Loss: {loss.item():.4f}", end="")
-                batch_start_time = time.time()
+            # Log rewards
+            rewards = []
+            for idx, action in enumerate(sampled_actions):
+                fen, uci_move = dataset.data[batch_id * batch_size + idx]
+                chess_env.board.set_fen(fen)
+                legal_moves = list(chess_env.board.legal_moves)
 
-            batch_id += 1
+                if action < len(legal_moves):
+                    chess_env.board.push(legal_moves[action])  # Apply the action
+                reward = chess_env.get_reward()  # Calculate reward using ChessEnv's logic
+                rewards.append(reward)
 
-        print(f"\rBatches {len(dataloader)}/{len(dataloader)} - Loss: {loss.item():.4f}", end="")
+            batch_rewards.extend(rewards)
+
+            if (batch_id + 1) % (len(dataloader) // 100) == 0:  # Log every 10% of the epoch
+                mean_reward = sum(batch_rewards) / len(batch_rewards)
+                print(f"Batch {batch_id + 1}/{len(dataloader)} - Avg Reward: {mean_reward:.2f}")
+
+        # Log epoch summary
+        epoch_mean_reward = sum(batch_rewards) / len(batch_rewards)
+        epoch_std_reward = np.std(batch_rewards)
         epoch_time = time.time() - epoch_start_time
-        print(f"Epoch {epoch + 1}/{epochs} completed in {epoch_time:.2f}s. Avg Loss: {total_loss / len(dataloader):.4f}")
+        print(
+            f"Epoch {epoch + 1}/{epochs} completed in {epoch_time:.2f}s. "
+            f"Avg Reward: {epoch_mean_reward:.2f} +/- {epoch_std_reward:.2f}, Avg Loss: {total_loss / len(dataloader):.4f}"
+        )
 
 
 class DummyChessEnv(Env):
@@ -212,9 +229,9 @@ def main():
 
         print("Starting pretraining...")
         if is_stockfish == "yes":
-            stockfish_for_pretraining.pretrain_model_with_stockfish_and_entropy_and_stochastic_sampling(model, dataset, epochs=5, batch_size=64, lr=1e-3)
+            stockfish_for_pretraining.pretrain_model_with_stockfish_and_entropy_and_stochastic_sampling(model, dataset, epochs=settings.epochs_for_pretraining, batch_size=64, lr=1e-3)
         else:
-            pretrain_model_with_entropy_and_stochastic_sampling(model, dataset, epochs=5, batch_size=64, lr=1e-3)
+            pretrain_model_with_entropy_and_stochastic_sampling(model, dataset, epochs=settings.epochs_for_pretraining, batch_size=64, lr=1e-3)
         vec_env.save(settings.normalized_env_path)
         model.save(settings.pretrained_model_path)
         end_time = datetime.datetime.now()

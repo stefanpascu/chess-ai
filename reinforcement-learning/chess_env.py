@@ -10,10 +10,11 @@ stockfish = Stockfish(path=settings.stockfish_path)
 
 
 class ChessEnv(Env):
-    def __init__(self, render_mode=None):
+    def __init__(self, render_mode=None, reward_scaling_factor=1.0):
         super(ChessEnv, self).__init__()
         self.board = chess.Board()
         self.previous_board = None
+        self.reward_scaling_factor = reward_scaling_factor
 
         # Observation space for NatureCNN (12 channels, 8x8 board)
         self.observation_space = spaces.Box(
@@ -38,7 +39,7 @@ class ChessEnv(Env):
         self.board.push(move)
 
         done = self.board.is_game_over()
-        reward = self.get_reward()
+        reward = self.get_reward() * self.reward_scaling_factor
         info = {"episode": {"r": reward, "l": len(self.board.move_stack)}} if done else {}
 
         return self.get_observation(), reward, done, False, info
@@ -62,20 +63,12 @@ class ChessEnv(Env):
         return obs
 
     def render(self, mode='human'):
-        """Renders the current board state."""
         if mode == 'human':
             print(self.board)
         else:
             pass  # Extend for other render modes if needed
 
     def set_state(self, new_board):
-        """
-        Updates the internal board state of the environment.
-
-        Args:
-            new_board (list[list[str]]): The new board state represented as an 8x8 list of piece strings.
-                                         Each string represents a piece, e.g., 'wP' for white pawn, '--' for empty square.
-        """
         self.board = chess.Board()  # Reset the board
         self.board.clear_board()  # Clear the board to start from a clean slate
 
@@ -89,9 +82,7 @@ class ChessEnv(Env):
                     self.board.set_piece_at(row * 8 + col,
                                             chess.Piece.from_symbol(piece_type.upper() if color else piece_type))
 
-
     def get_reward(self):
-        """Calculates the reward based on the current board state."""
         reward = self.evaluate_board(self.board, self.previous_board)
 
         # Evaluate trade if the last move involved a capture
@@ -107,15 +98,6 @@ class ChessEnv(Env):
 
 
     def evaluate_trade(self, move):
-        """
-        Evaluates whether a trade is favorable based on piece values and protection.
-
-        Args:
-            move (chess.Move): The move to evaluate.
-
-        Returns:
-            float: Positive value for favorable trades, negative for unfavorable trades, 0 for neutral.
-        """
         piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
 
         # Get the pieces involved in the trade
@@ -149,9 +131,6 @@ class ChessEnv(Env):
 
 
     def evaluate_board(self, current_board, previous_board=None):
-        """
-        Combines multiple evaluation functions to calculate the overall reward.
-        """
         reward = 0
         reward += self.evaluate_material()
         reward += self.evaluate_king_safety()
@@ -165,12 +144,9 @@ class ChessEnv(Env):
 
         reward += self.evaluate_game_result(current_board)
 
-        return reward / 10  # Normalize rewards to avoid large fluctuations
+        return reward # Normalize rewards to avoid large fluctuations
 
     def evaluate_material(self):
-        """
-        Evaluates material advantage with added mobility and piece-square tables for context.
-        """
         piece_values = {'P': 1, 'N': 3.2, 'B': 3.3, 'R': 5, 'Q': 9}
         piece_square_tables = {
             'P': [  # Pawns
@@ -250,10 +226,6 @@ class ChessEnv(Env):
         return reward
 
     def evaluate_center_control(self):
-        """
-        Rewards controlling the center of the board.
-        Central squares are d4, e4, d5, and e5, with slightly less emphasis on the larger center.
-        """
         central_squares = {chess.D4, chess.E4, chess.D5, chess.E5}  # Most critical center
         extended_center = {chess.C3, chess.C4, chess.C5, chess.C6,
                            chess.D3, chess.D6, chess.E3, chess.E6,
@@ -275,9 +247,6 @@ class ChessEnv(Env):
         return reward
 
     def evaluate_king_safety(self):
-        """
-        Evaluates king safety based on castling, exposure, and pawn protection.
-        """
         reward = 0
 
         # Define castling positions
@@ -319,10 +288,6 @@ class ChessEnv(Env):
         return reward
 
     def evaluate_positional_advantage(self):
-        """
-        Evaluates positional advantages, including open files, semi-open files, outposts,
-        and penalties for positional weaknesses like doubled pawns.
-        """
         reward = 0
 
         # Define open and semi-open files
@@ -367,10 +332,6 @@ class ChessEnv(Env):
         return reward
 
     def is_outpost(self, square, color):
-        """
-        Checks if a knight's position is an outpost.
-        An outpost is a square protected by a pawn and cannot be attacked by enemy pawns.
-        """
         pawn_color = chess.WHITE if color == chess.WHITE else chess.BLACK
         opponent_color = not pawn_color
 
@@ -403,9 +364,6 @@ class ChessEnv(Env):
 
 
     def evaluate_piece_coordination(self):
-        """
-        Evaluates piece coordination by rewarding mutual support, coordinated attacks, and synergy.
-        """
         reward = 0
 
         # Reward mutual support between pieces
@@ -443,9 +401,6 @@ class ChessEnv(Env):
         return reward
 
     def evaluate_tempo(self):
-        """
-        Rewards quick development of pieces and penalizes wasting tempo.
-        """
         reward = 0
 
         # Minor pieces that have been developed (not on starting squares)
@@ -483,10 +438,6 @@ class ChessEnv(Env):
         return reward
 
     def evaluate_move_quality(self, previous_board, current_board):
-        """
-        Compares the AI move to Stockfish's best move and evaluates the move's quality
-        based on evaluation scores.
-        """
         # Set Stockfish to the previous board state
         stockfish.set_depth(5)
         stockfish.update_engine_parameters({"Threads": 1, "Hash": 128})
@@ -522,9 +473,6 @@ class ChessEnv(Env):
             return -1  # Severe blunder
 
     def evaluate_game_result(self, board):
-        """
-        Evaluates the game result, rewarding faster wins with higher scores.
-        """
         move_count = len(self.board.move_stack)  # Count the number of moves played so far
 
         # Define base rewards

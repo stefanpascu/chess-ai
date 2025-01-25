@@ -49,7 +49,7 @@ class EntropyDecayCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         # Calculate the new entropy coefficient based on training progress
-        progress = self.num_timesteps / self.total_timesteps
+        progress = min(max(self.num_timesteps / self.total_timesteps, 0), 1)
         new_entropy_coef = (
             self.initial_entropy_coef +
             progress * (self.final_entropy_coef - self.initial_entropy_coef)
@@ -59,7 +59,7 @@ class EntropyDecayCallback(BaseCallback):
 
 # Environment setup
 def make_chess_env():
-    env = ChessEnv()
+    env = ChessEnv(reward_scaling_factor=0.0001)
     env = Monitor(env)
     return env
 
@@ -132,7 +132,7 @@ if __name__ == '__main__':
 
     # Define callbacks
     entropy_decay_callback = EntropyDecayCallback(
-        initial_entropy_coef=0.01,
+        initial_entropy_coef=0.1,
         final_entropy_coef=0.001,  # Lower entropy for exploitation
         total_timesteps=total_timesteps,
     )
