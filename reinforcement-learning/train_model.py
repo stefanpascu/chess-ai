@@ -38,7 +38,7 @@ class CustomCNN(BaseFeaturesExtractor):
 
 
 def make_chess_env():
-    env = ChessEnv(reward_scaling_factor=0.01)
+    env = ChessEnv(reward_scaling_factor=1.0)
     env = Monitor(env)
     return env
 
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     policy_kwargs = {
-        "features_extractor_class": None,  # Replace with CustomCNN if using it
+        "features_extractor_class": CustomCNN,
         "normalize_images": False,
     }
 
@@ -92,7 +92,17 @@ if __name__ == "__main__":
         best_model = PPO.load(best_model_path, device=device)
     else:
         print("No best model found. Creating a new one...")
-        best_model = PPO("CnnPolicy", vec_env, policy_kwargs=policy_kwargs, device=device, verbose=1)
+        best_model = PPO(
+            "CnnPolicy",
+            vec_env,
+            policy_kwargs=policy_kwargs,
+            verbose=1,
+            n_steps=4096,
+            batch_size=1024,
+            learning_rate=1e-4,
+            ent_coef=0.01,
+            device=device,
+        )
 
     # Initialize or load the current model
     if os.path.exists(model_path):
@@ -138,7 +148,7 @@ if __name__ == "__main__":
     while True:
         # Train for a chunk of timesteps
         model.learn(
-            total_timesteps=200_000,  # Train in chunks of 200,000 timesteps
+            total_timesteps=total_timesteps,  # Train in chunks of 200,000 timesteps
             callback=[eval_callback, checkpoint_callback],
         )
 

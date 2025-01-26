@@ -9,7 +9,8 @@ from chess_env import ChessEnv
 import settings
 
 # Load the trained PPO model
-model = PPO.load(settings.reinforced_model_path)
+model = PPO.load(settings.best_model_path)
+# model = PPO.load(settings.reinforced_model_path)
 # model = PPO.load(settings.pretrained_model_path)
 
 # Initialize the Chess environment (for AI)

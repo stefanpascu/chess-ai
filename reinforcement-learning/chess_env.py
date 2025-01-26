@@ -60,3 +60,18 @@ class ChessEnv(Env):
     def render(self, mode="human"):
         if mode == "human":
             print(self.board)
+
+    def set_state(self, new_board):
+        self.board = chess.Board()  # Reset the board
+        self.board.clear_board()  # Clear the board to start from a clean slate
+
+        # Recreate the board state
+        for row in range(8):
+            for col in range(8):
+                piece = new_board[row][col]
+                if piece != '--':  # If there's a piece, add it to the board
+                    piece_type = piece[1].lower()  # Convert to lowercase for compatibility with `python-chess`
+                    color = chess.WHITE if piece[0] == 'w' else chess.BLACK
+                    self.board.set_piece_at(row * 8 + col,
+                                            chess.Piece.from_symbol(piece_type.upper() if color else piece_type))
+
