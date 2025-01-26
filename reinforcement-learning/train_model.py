@@ -17,8 +17,9 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 class CustomCNN(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim=256):
         super(CustomCNN, self).__init__(observation_space, features_dim)
+        n_input_channels = observation_space.shape[0]
         self.cnn = nn.Sequential(
-            nn.Conv2d(12, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(n_input_channels, 32, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
@@ -83,7 +84,7 @@ if __name__ == "__main__":
     }
 
     model_path = settings.reinforced_model_path
-    best_model_path = settings.best_model_path  # Path to save the best model
+    best_model_path = settings.best_model_path
     total_timesteps = settings.training_number_of_timestamps
 
     # Load the best model or initialize a new one
@@ -148,7 +149,7 @@ if __name__ == "__main__":
     while True:
         # Train for a chunk of timesteps
         model.learn(
-            total_timesteps=total_timesteps,  # Train in chunks of 200,000 timesteps
+            total_timesteps=total_timesteps,
             callback=[eval_callback, checkpoint_callback],
         )
 

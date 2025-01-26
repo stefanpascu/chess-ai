@@ -14,7 +14,8 @@ max_games_for_pretraining = 2**11
 epochs_for_pretraining = 5
 
 # training variables
-training_number_of_timestamps = 2**22
+# 16-17 for testing if code compiles, 20 for testing, 22+ for hardcore training
+training_number_of_timestamps = 2**20
 
 
 # will only use for demonstration of optimization and data collection
