@@ -30,7 +30,12 @@ class ChessEnv(Env):
         """
         Dynamically update the action space based on the number of legal moves.
         """
-        self.action_space = spaces.Discrete(len(list(self.board.legal_moves)))
+        # TODO: this needs changing?? should it be NONE when no legal moves are available??
+        num_legal_moves = len(list(self.board.legal_moves))
+        if num_legal_moves > 0:
+            self.action_space = spaces.Discrete(num_legal_moves)
+        else:
+            self.action_space = None
 
     def reset(self, seed=None, options=None):
         """
@@ -51,12 +56,14 @@ class ChessEnv(Env):
         # Get the list of legal moves for the current state
         legal_moves = list(self.board.legal_moves)
 
-        if self.board.is_check():
+        # TODO: this is incorrect because it is a random move(not chosen by the model) - should be changed because sometimes the model chooses illegal moves to proceed with
+        if action >= len(legal_moves):
+            action = action % len(legal_moves)
+
+        if action >= len(legal_moves):
             print("Legal moves: ", legal_moves)
             print("Number of legal moves: ", len(legal_moves))
             print("Action: ", action)
-
-        if action >= len(legal_moves):
             print("Board: \n")
             print(self.board)
             raise ValueError(f"Invalid action {action}. Total legal moves: {len(legal_moves)}.")

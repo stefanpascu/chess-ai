@@ -74,6 +74,7 @@ def evaluate_models(new_model, best_model, num_games=10):
 if __name__ == "__main__":
     num_envs = 4
     vec_env = SubprocVecEnv([make_chess_env for _ in range(num_envs)])
+    # vec_env = SubprocVecEnv([lambda: LegalActionWrapper(make_chess_env()) for _ in range(num_envs)])
     vec_env = VecNormalize(vec_env)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
