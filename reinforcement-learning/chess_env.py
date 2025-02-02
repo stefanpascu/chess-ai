@@ -1,6 +1,8 @@
 import chess
 import numpy as np
 from gymnasium import Env, spaces
+from numpy.f2py.auxfuncs import throw_error
+
 
 class ChessEnv(Env):
     def __init__(self, render_mode=None, reward_scaling_factor=1.0):
@@ -8,90 +10,42 @@ class ChessEnv(Env):
         self.board = chess.Board()
         self.reward_scaling_factor = reward_scaling_factor
 
-        # Observation space: (18, 8, 8) representation
-        self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(18, 8, 8), dtype=np.float64
-        )
+        self.all_possible_moves = self._generate_all_possible_moves()
+        n_actions = len(self.all_possible_moves)
 
-        self.all_possible_moves = [move.uci() for move in chess.Board().legal_moves]
+        self.action_space = spaces.Discrete(n_actions)
 
-        # Action space: 4672 discrete moves (all theoretical moves)
-        # self.action_space = spaces.Discrete(4672)
-
-        # Initialize action space (will be dynamically updated)
-        self.action_space = None
-        self.update_action_space()
+        self.observation_space = spaces.Dict({
+            "observation": spaces.Box(low=0.0, high=1.0, shape=(18, 8, 8), dtype=np.float32),
+            "action_mask": spaces.Box(low=0, high=1, shape=(n_actions,), dtype=np.bool_)
+        })
 
         self.render_mode = render_mode
         self.result = None
         self.winner = None
 
-    def update_action_space(self):
-        """
-        Dynamically update the action space based on the number of legal moves.
-        """
-        # TODO: this needs changing?? should it be NONE when no legal moves are available??
-        num_legal_moves = len(list(self.board.legal_moves))
-        if num_legal_moves > 0:
-            self.action_space = spaces.Discrete(num_legal_moves)
-        else:
-            self.action_space = None
-
-    def reset(self, seed=None, options=None):
-        """
-        Reset the environment to the starting position.
-        """
-        super().reset(seed=seed)
-        self.board.reset()
-        self.result = None
-        self.winner = None
-        self.update_action_space()  # Update action space
-        return self.get_observation(), {}
-
-    def step(self, action):
-        """
-        Execute a move based on the provided action index and update the environment state.
-        :param action: Integer index of a legal move for the current board state.
-        """
-        # Get the list of legal moves for the current state
-        legal_moves = list(self.board.legal_moves)
-
-        # TODO: this is incorrect because it is a random move(not chosen by the model) - should be changed because sometimes the model chooses illegal moves to proceed with
-        if action >= len(legal_moves):
-            action = action % len(legal_moves)
-
-        if action >= len(legal_moves):
-            print("Legal moves: ", legal_moves)
-            print("Number of legal moves: ", len(legal_moves))
-            print("Action: ", action)
-            print("Board: \n")
-            print(self.board)
-            raise ValueError(f"Invalid action {action}. Total legal moves: {len(legal_moves)}.")
-
-        # Get the selected move and execute it
-        move = legal_moves[action]
-        self.board.push(move)
-
-        # Check if the game is over
-        done = self.board.is_game_over()
-        reward = self._evaluate_result() * self.reward_scaling_factor if done else self._evaluate_material_balance()
-
-        # Update action space for the next step
-        self.update_action_space()
-
-        return self.get_observation(), reward, done, False, {}
+    def _generate_all_possible_moves(self):
+        moves = []
+        for from_sq in chess.SQUARES:
+            for to_sq in chess.SQUARES:
+                move = chess.Move(from_sq, to_sq)
+                moves.append(move.uci())
+                if chess.square_rank(from_sq) == 6 and chess.square_rank(to_sq) == 7:
+                    for prom in ['q', 'r', 'b', 'n']:
+                        promo_move = chess.Move(from_sq, to_sq, promotion=chess.Piece.from_symbol(prom.upper()).piece_type)
+                        moves.append(promo_move.uci())
+                if chess.square_rank(from_sq) == 1 and chess.square_rank(to_sq) == 0:
+                    for prom in ['q', 'r', 'b', 'n']:
+                        promo_move = chess.Move(from_sq, to_sq, promotion=chess.Piece.from_symbol(prom.lower()).piece_type)
+                        moves.append(promo_move.uci())
+        # Remove duplicates while preserving order.
+        moves = list(dict.fromkeys(moves))
+        return moves
 
     def get_observation(self):
-        """
-        Convert the current board state into (18, 8, 8) neural network input planes.
-        """
         planes = np.zeros((18, 8, 8), dtype=np.float32)
-
-        # Piece planes (12 channels)
-        piece_map = {
-            chess.PAWN: 0, chess.KNIGHT: 1, chess.BISHOP: 2,
-            chess.ROOK: 3, chess.QUEEN: 4, chess.KING: 5
-        }
+        piece_map = {chess.PAWN: 0, chess.KNIGHT: 1, chess.BISHOP: 2,
+                     chess.ROOK: 3, chess.QUEEN: 4, chess.KING: 5}
         for square in chess.SQUARES:
             piece = self.board.piece_at(square)
             if piece:
@@ -101,56 +55,92 @@ class ChessEnv(Env):
                     layer += 6
                 planes[layer, row, col] = 1.0
 
-        # Castling rights (4 channels)
-        castling_map = {'K': 12, 'Q': 13, 'k': 14, 'q': 15}
         castling_map = {'K': 12, 'Q': 13, 'k': 14, 'q': 15}
         if self.board.has_kingside_castling_rights(chess.WHITE):
-            planes[castling_map['K']] = 1.0
+            planes[castling_map['K'], :, :] = 1.0
         if self.board.has_queenside_castling_rights(chess.WHITE):
-            planes[castling_map['Q']] = 1.0
+            planes[castling_map['Q'], :, :] = 1.0
         if self.board.has_kingside_castling_rights(chess.BLACK):
-            planes[castling_map['k']] = 1.0
+            planes[castling_map['k'], :, :] = 1.0
         if self.board.has_queenside_castling_rights(chess.BLACK):
-            planes[castling_map['q']] = 1.0
+            planes[castling_map['q'], :, :] = 1.0
 
-        # Fifty-move rule (1 channel)
-        planes[16] = self.board.halfmove_clock / 100.0
-
-        # En passant (1 channel)
+        planes[16, :, :] = self.board.halfmove_clock / 100.0
         if self.board.ep_square is not None:
             row, col = divmod(self.board.ep_square, 8)
             planes[17, row, col] = 1.0
 
         return planes
 
-    def _evaluate_result(self):
-        """
-        Evaluate the game result to assign rewards.
-        """
-        if self.board.is_checkmate():
-            return 1 if self.board.turn == chess.BLACK else -1
-        elif self.board.is_stalemate() or self.board.is_insufficient_material() or self.board.can_claim_fifty_moves():
-            return 0  # Draw
-        else:
-            return 0  # Intermediate state
+    def get_action_mask(self):
+        """Returns a binary mask indicating legal moves for the current board position."""
+
+        # 🚨 If game is over, return all zeros
+        if self.board.is_game_over():
+            print(f"🚨 Game is over at FEN: {self.board.fen()} | Returning all-zero action mask.")
+            return np.zeros(len(self.all_possible_moves), dtype=np.bool_)
+
+        # Initialize mask with zeros
+        action_mask = np.zeros(len(self.all_possible_moves), dtype=np.bool_)
+        legal_moves = self.get_legal_moves()
+
+        for i, move in enumerate(self.all_possible_moves):
+            if move in legal_moves:
+                action_mask[i] = 1  # Mark legal moves as 1
+
+        # print("(Inside get_action_mask)Action mask contains non-binary values: ", action_mask)
+
+        return action_mask
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.board.reset()
+        self.result = None
+        self.winner = None
+        obs = {
+            "observation": self.get_observation(),
+            "action_mask": self.get_action_mask()
+        }
+        return obs, {}
+
+    def step(self, action):
+        move_uci = self.all_possible_moves[action]
+        move = chess.Move.from_uci(move_uci)
+
+        if move not in self.board.legal_moves:
+            print(f"🚨 ERROR: Move {move_uci} is not legal in this state!")
+            print(f"Legal moves: {[m.uci() for m in self.board.legal_moves]}")
+            raise ValueError(
+                f"Chosen move {move_uci} is illegal in this state. "
+                f"Legal moves count: {len(list(self.board.legal_moves))}"
+            )
+
+        self.board.push(chess.Move.from_uci(move_uci))
+
+        done = self.board.is_game_over()
+        reward = (self._evaluate_result() * self.reward_scaling_factor
+                  if done else self._evaluate_material_balance())
+
+        obs = {
+            "observation": self.get_observation(),
+            "action_mask": self.get_action_mask() if not done else np.zeros(len(self.all_possible_moves),
+                                                                            dtype=np.bool_)
+        }
+        # print(f"(Inside step) Correct action mask:\n{obs['action_mask']}")
+
+        if done and np.sum(obs["action_mask"]) != 0:
+            print("🚨 ERROR: Game over but action mask is not zeros!")
+
+        return obs, reward, done, False, {}
 
     def render(self, mode="human"):
-        """
-        Render the current board state.
-        """
         if mode == "human":
             print(self.board)
 
     def set_state(self, new_board):
-        """
-        Set the board state to a specific configuration.
-        """
         self.board = chess.Board(fen=new_board)
 
     def adjudicate(self):
-        """
-        Adjudicate the result based on a heuristic evaluation.
-        """
         score = self._evaluate_material_balance()
         if abs(score) < 0.01:
             self.result = "1/2-1/2"
@@ -162,10 +152,17 @@ class ChessEnv(Env):
             self.result = "0-1"
             self.winner = chess.BLACK
 
+    def _evaluate_result(self):
+        if self.board.is_checkmate():
+            return 1 if self.board.turn == chess.BLACK else -1
+        elif (self.board.is_stalemate() or
+              self.board.is_insufficient_material() or
+              self.board.can_claim_fifty_moves()):
+            return 0
+        else:
+            return 0
+
     def _evaluate_material_balance(self):
-        """
-        Heuristically evaluate the material balance of the board.
-        """
         piece_values = {
             chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3.25,
             chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0
@@ -179,7 +176,4 @@ class ChessEnv(Env):
         return balance
 
     def get_legal_moves(self):
-        """
-        Return a list of all legal moves in UCI notation.
-        """
         return [move.uci() for move in self.board.legal_moves]

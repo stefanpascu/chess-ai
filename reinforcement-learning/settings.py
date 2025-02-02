@@ -15,7 +15,7 @@ epochs_for_pretraining = 5
 
 # training variables
 # 16-17 for testing if code compiles, 20 for testing, 22+ for hardcore training
-training_number_of_timestamps = 2**16
+training_number_of_timestamps = 2**13
 
 
 # will only use for demonstration of optimization and data collection
