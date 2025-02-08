@@ -6,15 +6,17 @@ import chess_engine
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from chess_env import ChessEnv
+import numpy as np
 import settings
+from train_model import CustomMaskablePPO, make_chess_env
 
 # Load the trained PPO model
-model = PPO.load(settings.best_model_path)
+model = CustomMaskablePPO.load(settings.best_model_path) if os.path.exists(settings.best_model_path) else CustomMaskablePPO.load(settings.reinforced_model_path)
 # model = PPO.load(settings.reinforced_model_path)
 # model = PPO.load(settings.pretrained_model_path)
 
 # Initialize the Chess environment (for AI)
-env = DummyVecEnv([lambda: ChessEnv()])
+env = make_chess_env()
 
 # Player settings. Turn player_one to True to play as white and/or player_two to True to play black.
 player_one = True  # If the AI is playing white, then False
@@ -226,26 +228,32 @@ if __name__ == '__main__':
 
         # AI move finder
         if not game_over and not human_turn:
-            env.envs[0].set_state(game_state.board)
+            # Unwrap the environment correctly
+            chess_env = env.envs[0]  # First unwrap
+            while hasattr(chess_env, "env"):  # Keep unwrapping until ChessEnv is reached
+                chess_env = chess_env.env
 
-            obs = env.envs[0].get_observation()
-            # debugging only
-            # piece_labels = [
-            #     "White Pawns", "White Knights", "White Bishops", "White Rooks",
-            #     "White Queens", "White Kings", "Black Pawns", "Black Knights",
-            #     "Black Bishops", "Black Rooks", "Black Queens", "Black Kings"
-            # ]
-            #
-            # for i, plane in enumerate(obs):
-            #     # Check if there are non-zero values in the plane
-            #     if plane.any():
-            #         if i < 6:  # First 6 planes are for white pieces
-            #             print(f"{piece_labels[i]} (1.0 values):\n{plane}\n")
-            #         else:  # Last 6 planes are for black pieces
-            #             print(f"{piece_labels[i]} (-1.0 values):\n{plane}\n")
+            # Debugging check
+            if chess_env is None:
+                raise RuntimeError("❌ ERROR: chess_env is None! Ensure the environment is initialized properly.")
 
-            # Predict the AI move using the PPO model
-            action, _states = model.predict(obs, deterministic=True)
+            # Check if ChessEnv has get_action_mask() before calling it
+            if not hasattr(chess_env, "get_action_mask"):
+                raise RuntimeError("❌ ERROR: chess_env does not have 'get_action_mask'! It may still be wrapped.")
+
+            # Now fetch the action mask
+            action_mask = np.array(chess_env.get_action_mask(), dtype=bool)
+
+            # Get the observation and ensure it contains "action_mask"
+            obs = chess_env.get_observation()
+
+            # ✅ Fix: Ensure "action_mask" is inside obs
+            obs = {"state": obs, "action_mask": action_mask}
+
+            print(f"DEBUG: Final Observation = {obs}")  # Verify before passing to model
+
+            # Predict the AI move
+            action, _states = model.predict(obs, state=None, deterministic=True)
 
             # Get the list of valid moves
             valid_moves = game_state.get_valid_moves()

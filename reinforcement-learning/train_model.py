@@ -100,6 +100,7 @@ def make_chess_env():
     env = Monitor(env)
     env = ActionMaskWrapper(env)
     env = DummyVecEnv([lambda: env])
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
     return env
 
 
@@ -220,16 +221,16 @@ if __name__ == "__main__":
         vec_env,
         best_model_save_path="./logs/",
         log_path="./logs/",
-        eval_freq=10000,
+        eval_freq=16_384,
         deterministic=True,
         render=False,
     )
 
-    checkpoint_callback = CheckpointCallback(
-        save_freq=100000,
-        save_path="./logs/",
-        name_prefix="chess_model_checkpoint",
-    )
+    # checkpoint_callback = CheckpointCallback(
+    #     save_freq=100000,
+    #     save_path="./logs/",
+    #     name_prefix="chess_model_checkpoint",
+    # )
 
     start_time = datetime.datetime.now()
     print(f"Training started at {start_time}...")
@@ -237,7 +238,10 @@ if __name__ == "__main__":
     while True:
         model.learn(
             total_timesteps=total_timesteps,
-            callback=[eval_callback, checkpoint_callback],
+            callback=[
+                eval_callback,
+                # checkpoint_callback
+            ],
         )
 
         print("Evaluating the new model against the best model...")
@@ -253,4 +257,12 @@ if __name__ == "__main__":
             print("Best model retained.")
 
         model.save(model_path)
-        vec_env.save(settings.normalized_env_path)
+
+        checkpoint_time = datetime.datetime.now()
+        print(f"Training checkpoint at {checkpoint_time}...")
+        print(f"Training duration since start: {checkpoint_time - start_time}...")
+
+        if isinstance(vec_env, VecNormalize):
+            vec_env.save(settings.normalized_env_path)
+        else:
+            print("⚠️ Skipping vec_env saving: Only VecNormalize environments can be saved.")

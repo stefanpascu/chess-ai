@@ -138,7 +138,55 @@ class ChessEnv(Env):
             print(self.board)
 
     def set_state(self, new_board):
-        self.board = chess.Board(fen=new_board)
+        """
+        Converts a 2D list representation of a chessboard into a valid FEN string
+        and sets the state of the chess.Board instance.
+        """
+        fen_components = []
+
+        for rank in new_board:
+            empty_squares = 0
+            rank_fen = ""
+
+            for square in rank:
+                converted_piece = self.convert_piece(square)
+
+                if converted_piece == "1":  # Empty square detected
+                    empty_squares += 1
+                else:
+                    if empty_squares > 0:
+                        rank_fen += str(empty_squares)  # Add empty square count
+                        empty_squares = 0
+                    rank_fen += converted_piece  # Add the piece itself
+
+            if empty_squares > 0:
+                rank_fen += str(empty_squares)  # Append remaining empty squares
+
+            fen_components.append(rank_fen)
+
+        # Join ranks with "/"
+        fen = "/".join(fen_components)
+
+        # Append additional FEN fields
+        fen += " w KQkq - 0 1"  # Default: White to move, castling rights, no en passant
+
+        print(f"Generated FEN: {fen}")  # Debugging output
+
+        self.board = chess.Board(fen=fen)  # Ensure chess library can read it
+
+    def convert_piece(self, piece):
+        piece_mapping = {
+            "wP": "P", "wR": "R", "wN": "N", "wB": "B", "wQ": "Q", "wK": "K",
+            "bP": "p", "bR": "r", "bN": "n", "bB": "b", "bQ": "q", "bK": "k"
+        }
+
+        if piece in piece_mapping:
+            return piece_mapping[piece]
+        elif piece in ["-", " ", "--"]:  # Handle `--` as empty squares
+            return "1"  # FEN uses numbers for empty squares
+        else:
+            print(f"Warning: Unrecognized piece '{piece}' - replacing with empty square.")
+            return "1"  # Default to empty square
 
     def adjudicate(self):
         score = self._evaluate_material_balance()
