@@ -168,3 +168,7 @@ if __name__ == "__main__":
         # Save the current model
         model.save(model_path)
         vec_env.save(settings.normalized_env_path)
+
+        checkpoint_time = datetime.datetime.now()
+        print(f"Training checkpoint at {checkpoint_time}...")
+        print(f"Reaching this checkpoint took {checkpoint_time-start_time}...")
