@@ -1,7 +1,7 @@
 import random
 
 # Depth of the algorithm determining AI moves. Higher set_depth == harder AI. Lower if engine is too slow.
-set_depth = 3
+set_depth = 5
 
 # Positive values are good for white, negative for black. i.e. black checkmate = -1000
 checkmate_points = 1000
@@ -164,9 +164,9 @@ def find_minimax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, max
             game_state.undo_move()
 
             # Pruning
-            # alpha = max(alpha, max_score)
-            # if beta <= alpha:
-            #     break
+            alpha = max(alpha, max_score)
+            if beta <= alpha:
+                break
 
         return max_score
     else:
@@ -182,9 +182,9 @@ def find_minimax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, max
             game_state.undo_move()
 
             # Pruning
-            # beta = min(beta, min_score)
-            # if beta <= alpha:
-            #     break
+            beta = min(beta, min_score)
+            if beta <= alpha:
+                break
 
         return min_score
 

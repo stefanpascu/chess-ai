@@ -68,7 +68,11 @@ class GameState:
             if (self.white_to_move and main.player_one) or (not self.white_to_move and main.player_two):
                 is_valid_piece = False
                 while not is_valid_piece:
-                    promoted_piece = input('Promote to Q(ueen), R(ook), B(ishop), or (k)N(ight):').upper()
+                    # TODO: solve this issue - chess engine breaks when promoted pawn is made a choice
+                    #  (the player can choose before reaching the last row), but works when he/she
+                    #  is forced to turn it into a queen
+                    # promoted_piece = input('Promote to Q(ueen), R(ook), B(ishop), or (k)N(ight):').upper()
+                    promoted_piece = "Q"
                     if promoted_piece in ["Q", "N", "B", "R"]:
                         is_valid_piece = True
                     else:
