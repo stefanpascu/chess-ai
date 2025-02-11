@@ -1,5 +1,7 @@
 import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Debug GPU errors
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"  # Deterministic behavior
 
 import datetime
 from stable_baselines3 import PPO
@@ -71,7 +73,9 @@ def evaluate_models(new_model, best_model, num_games=10):
 
 
 if __name__ == "__main__":
-    num_envs = 4
+    num_envs = settings.num_envs
+    batch_size = settings.batch_size
+    n_steps = settings.n_steps
     vec_env = SubprocVecEnv([make_chess_env for _ in range(num_envs)])
     vec_env = VecNormalize(vec_env)
 
@@ -80,6 +84,11 @@ if __name__ == "__main__":
     policy_kwargs = {
         "features_extractor_class": CustomCNN,
         "normalize_images": False,
+        "use_sde": False,
+        "clip_range_vf": None,
+        "clip_range": 0.2,
+        "torch_jit": True,  # Use TorchScript optimization if available
+        "dtype": torch.float16,  # Mixed precision
     }
 
     model_path = settings.reinforced_model_path
@@ -89,7 +98,12 @@ if __name__ == "__main__":
     # Load the best model or initialize a new one
     if os.path.exists(best_model_path):
         print(f"Loading best model from {best_model_path}...")
-        best_model = PPO.load(best_model_path, device=device)
+        best_model = PPO.load(
+            best_model_path,
+            device=device,
+            n_steps=n_steps,
+            batch_size=batch_size
+        )
     else:
         print("No best model found. Creating a new one...")
         best_model = PPO(
@@ -97,8 +111,8 @@ if __name__ == "__main__":
             vec_env,
             policy_kwargs=policy_kwargs,
             verbose=1,
-            n_steps=4096,
-            batch_size=1024,
+            n_steps=n_steps,
+            batch_size=batch_size,
             learning_rate=1e-4,
             ent_coef=0.01,
             device=device,
@@ -107,7 +121,14 @@ if __name__ == "__main__":
     # Initialize or load the current model
     if os.path.exists(model_path):
         print(f"Loading current model from {model_path}...")
-        model = PPO.load(model_path, env=vec_env, device=device, verbose=1)
+        model = PPO.load(
+            model_path,
+            env=vec_env,
+            device=device,
+            verbose=1,
+            n_steps=n_steps,
+            batch_size=batch_size
+        )
     else:
         print("Creating a new PPO model...")
         model = PPO(
@@ -115,8 +136,8 @@ if __name__ == "__main__":
             vec_env,
             policy_kwargs=policy_kwargs,
             verbose=1,
-            n_steps=4096,
-            batch_size=1024,
+            n_steps=n_steps,
+            batch_size=batch_size,
             learning_rate=1e-4,
             ent_coef=0.01,
             device=device,
@@ -142,6 +163,7 @@ if __name__ == "__main__":
     )
 
     # Start training
+    print(f"Model device: {model.policy.device}")
     start_time = datetime.datetime.now()
     print(f"Training started at {start_time}...")
 
@@ -154,7 +176,7 @@ if __name__ == "__main__":
 
         # Evaluate the new model against the best
         print("Evaluating the new model against the best model...")
-        wins, losses, draws = evaluate_models(model, best_model, num_games=20)
+        wins, losses, draws = evaluate_models(model, best_model, num_games=100)
         print(f"Evaluation results: {wins} Wins, {losses} Losses, {draws} Draws")
 
         # Replace the best model if the new model performs better

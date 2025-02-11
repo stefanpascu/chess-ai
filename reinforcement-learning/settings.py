@@ -6,6 +6,9 @@ best_model_path = "models/best_model.zip"
 
 # training variables
 training_number_of_timestamps = 2**22
+batch_size = 2**12
+n_steps = 2**13
+num_envs = 2**3
 
 
 # will only use for demonstration of optimization and data collection
