@@ -83,12 +83,7 @@ if __name__ == "__main__":
 
     policy_kwargs = {
         "features_extractor_class": CustomCNN,
-        "normalize_images": False,
-        "use_sde": False,
-        "clip_range_vf": None,
-        "clip_range": 0.2,
-        "torch_jit": True,  # Use TorchScript optimization if available
-        "dtype": torch.float16,  # Mixed precision
+        "normalize_images": False
     }
 
     model_path = settings.reinforced_model_path
@@ -115,6 +110,7 @@ if __name__ == "__main__":
             batch_size=batch_size,
             learning_rate=1e-4,
             ent_coef=0.01,
+            clip_range=0.2,
             device=device,
         )
 
@@ -140,6 +136,7 @@ if __name__ == "__main__":
             batch_size=batch_size,
             learning_rate=1e-4,
             ent_coef=0.01,
+            clip_range=0.2,
             device=device,
         )
 
@@ -163,7 +160,10 @@ if __name__ == "__main__":
     )
 
     # Start training
-    print(f"Model device: {model.policy.device}")
+    if model.policy.device:
+        print(f"Model device: {torch.cuda.get_device_name(0)}")
+    else:
+        print(f"No device found for cuda")
     start_time = datetime.datetime.now()
     print(f"Training started at {start_time}...")
 
