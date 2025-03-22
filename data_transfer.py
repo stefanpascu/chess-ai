@@ -24,16 +24,18 @@ board = chess.Board()
 
 # Parametri fizici ai tablei de șah (modificabili)
 board_origin_x = 120.0  # Poziția X a colțului din stânga-jos al tablei (mm)
-board_origin_y = 318.0  # Poziția Y a colțului din stânga-jos al tablei (mm)
-board_margin = 27.0  # Marja de la marginea tablei până la zona de joc (mm)
-square_size = 25.0  # Latura fiecărui pătrat (mm)
-board_z = 16.0  # Înălțimea suprafeței tablei (mm)
+board_origin_y = 70.0  # Poziția Y a colțului din stânga-jos al tablei (mm)
+board_margin = 20.0  # Marja de la marginea tablei până la zona de joc (mm)
+square_size = 24.0  # Latura fiecărui pătrat (mm)
+board_z = 15.0  # Înălțimea suprafeței tablei (mm)
 
 # Parametri ai brațului robotic (ipoteză, conform exemplului HowToMechatronics)
-base_height = 95.0  # H: înălțimea bazei (mm)
-upper_arm_length = 125.0  # L1: lungimea brațului superior (umăr la cot) (mm)
-forearm_length = 125.0  # L2: lungimea brațului inferior (cot la încheietură) (mm)
-
+base_height = 100.0  # H: înălțimea bazei (mm)
+upper_arm_length = 120.0  # L1: lungimea brațului superior (umăr la cot) (mm)
+forearm_length = 120.0  # L2: lungimea brațului inferior (cot la încheietură) (mm)
+claw_height = 130.0
+forearm_and_claw_error_margin_length = 15.0
+piece_grabbing_point_length = 2
 
 def get_square_center(square):
     """
@@ -43,67 +45,65 @@ def get_square_center(square):
     """
     file = chess.square_file(square)  # 0-7 (A-H)
     rank = chess.square_rank(square)  # 0-7 (rândul 1 este 0)
-    x = board_origin_x + board_margin + (file + 0.5) * square_size
-    y = board_origin_y + board_margin + (rank + 0.5) * square_size
-    # x = board_origin_x - board_margin - (square_size / 2)
-    # y = board_origin_y - board_margin - (square_size / 2)
-    z = board_z
+    x = board_origin_x - board_margin - (file + 0.5) * square_size
+    y = board_origin_y + board_margin + (7 - (rank + 0.5)) * square_size
+    z = claw_height + board_z + piece_grabbing_point_length - base_height
     return x, y, z
 
 
-def calculate_inverse_kinematics(x, y, z):
-    """
-    Calculează un set de 6 unghiuri pentru brațul robotic astfel încât end-effectorul să ajungă la (x, y, z).
-    Valorile sunt în milimetri, iar unghiurile rezultate în grade.
+def calculate_inverse_kinematics(x, y, z, is_grabbing):
+    b = math.degrees(math.atan2(y, x)) # * (180 / math.pi)
 
-    Mapping:
-      - Servo 0: rotația bazei (calculată din x, y)
-      - Servo 1: umărul (mișcare verticală, calculată din proiecția pe planul vertical)
-      - Servo 2: cotul (calculat cu legea cosinusului)
-      - Servo 3: încheietura (blocată la 90° pentru a extinde lungimea antebrațului)
-      - Servo 4: compensează orientarea wrist-ului (calculat astfel încât efectul total să fie orizontal)
-      - Servo 5: cleștele (setat la 90° pentru deschis)
-    """
-    # 1. Calculul rotației bazei (Servo 0)
-    theta0 = math.degrees(math.atan2(y, x))
+    # base_offset = 17.0  # example offset from the center of rotation
+    # l = math.sqrt(x*x + y*y) - base_offset
+    l = math.sqrt(x*x + y*y)
 
-    # 2. Distanța orizontală de la origine
-    R = math.sqrt(x ** 2 + y ** 2)
+    # h = math.sqrt(l**2 + z**2) - forearm_and_claw_error_margin_length
+    h = math.sqrt(l*l + z*z)
 
-    # 3. Diferența verticală față de baza brațului (base_height)
-    Z = z - base_height
+    # phi = math.atan(z / l) * (180 / math.pi)
+    phi = math.degrees(math.atan2(z, l))
 
-    # 4. Distanța totală de la umăr la țintă
-    d = math.sqrt(R ** 2 + Z ** 2)
-    if d > (upper_arm_length + forearm_length):
-        print("Ținta este inaccesibilă, d =", d)
-        d = upper_arm_length + forearm_length  # Saturăm la limita maximă
+    # theta = math.acos((h / 2) / 120) * (180 / math.pi)
+    link_length = 120.0
+    half_h = h / 2.0
+    if half_h > link_length:
+        # Out of reach, or you could clamp the value
+        # to avoid math domain error in acos
+        theta = 0
+    else:
+        theta = math.degrees(math.acos(half_h / link_length))
 
-    # 5. Calculul unghiului de la cot (Servo 2) folosind legea cosinusului:
-    cos_angle = (upper_arm_length ** 2 + forearm_length ** 2 - d ** 2) / (2 * upper_arm_length * forearm_length)
-    cos_angle = max(-1.0, min(1.0, cos_angle))
-    theta_elbow = math.acos(cos_angle)  # în radiani
-    servo2 = 180 - math.degrees(theta_elbow)
+    a1 = phi + theta
+    a2 = phi - theta
 
-    # 6. Calculul unghiului umărului (Servo 1)
-    cos_shoulder = (upper_arm_length ** 2 + d ** 2 - forearm_length ** 2) / (2 * upper_arm_length * d)
-    cos_shoulder = max(-1.0, min(1.0, cos_shoulder))
-    theta_shoulder_offset = math.acos(cos_shoulder)  # în radiani
-    theta_shoulder_line = math.atan2(Z, R)
-    servo1 = math.degrees(theta_shoulder_line + theta_shoulder_offset)
+    servo0 = b
+    servo1 = a1
+    servo2 = 0 + (a1 - a2)
+    servo3 = 85
 
-    # 7. Blocăm incheietura la 90° (Servo 3)
-    servo3 = 90
+    # -- 5) Wrist angle (servo4) to keep end-effector vertical (down) --
+    # In a simple 2-link planar arm, the final orientation is (shoulder + elbow).
+    # We want that final orientation to be 90° in the plane if "90°" means "straight down."
+    #
+    # totalOrientation = servo1 + (servo2 - 180)
+    # We want the end-effector to remain at 90°, so:
+    #   servo4 = 90 - totalOrientation
+    # Substituting servo2 = a2 + 180 => totalOrientation = servo1 + a2
+    # but in code, "servo2" is already (a2 + 180). So:
+    #   servo4 = 90 - (servo1 + (servo2 - 180)) = 270 - servo1 - servo2
+    #
+    # That keeps the wrist pointing "down" in the vertical plane.
+    servo4 = 0 - a2
 
-    # 8. Calculăm compensarea pentru wrist (Servo 4)
-    # Pentru a păstra orientarea orizontală, dorim ca suma efectivă a unghiurilor la umăr, cot și wrist să fie 180°.
-    # Dacă servo3 este blocat la 90, atunci servo4 trebuie să fie:
-    servo4 = 90 - (servo1 + servo2)
+    # servo4 = 90
+    if is_grabbing:
+        servo5 = 15 # closed
+    else:
+        servo5 = 25 # open
 
-    # 9. Servo 5 (clește) rămâne la 90° (stare deschisă)
-    servo5 = 90
-
-    return [int(round(theta0)), int(round(servo1)), int(round(servo2)), servo3, int(round(servo4)), servo5]
+    return [int(round(servo0)), int(round(servo1)), int(round(servo2)), servo3, int(round(servo4)), servo5]
+    # return [90, 90, 90, 85, 0, 25]
 
 
 def get_observation_from_board(board):
@@ -147,12 +147,19 @@ def map_move_to_robot_arm(move):
     calculează inverse kinematics și returnează un set de 6 unghiuri pentru servomotoare.
     Folosește pătratul de destinație al mișcării.
     """
+    current_square = move.from_square
+    current_x, current_y, current_z = get_square_center(current_square)
+    print(f"Current square center coordinates: x={current_x}, y={current_y}, z={current_z}")
+    servo_angles_current = calculate_inverse_kinematics(current_x, current_y, current_z, False)
+    print(f"Calculated servo angles: {servo_angles_current}")
+
     target_square = move.to_square
-    x, y, z = get_square_center(target_square)
-    print(f"Target square center coordinates: x={x}, y={y}, z={z}")
-    servo_angles = calculate_inverse_kinematics(x, y, z)
-    print(f"Calculated servo angles: {servo_angles}")
-    return servo_angles
+    target_x, target_y, target_z = get_square_center(target_square)
+    print(f"Target square center coordinates: x={target_x}, y={target_y}, z={target_z}")
+    servo_angles_target = calculate_inverse_kinematics(target_x, target_y, target_z, True)
+    print(f"Calculated servo angles: {servo_angles_target}")
+
+    return servo_angles_current, servo_angles_target
 
 
 def send_move_to_arduino(servo_angles):
@@ -177,18 +184,47 @@ def send_move_to_arduino(servo_angles):
 
 
 # Bucla principală a jocului de șah
+initial_move = chess.Move.from_uci("d3a3")
+alternate_move = chess.Move.from_uci("a3d3")
+move = initial_move
 while not board.is_game_over():
     try:
-        move = decide_move(board)
-        if move is None:
-            print("No valid moves left. Game Over.")
-            break
-        move = chess.Move.from_uci("a2a1")
+        # move = decide_move(board)
+        # if move is None:
+        #     print("No valid moves left. Game Over.")
+        #     break
+        if move == initial_move:
+            move = alternate_move
+        else:
+            move = initial_move
         print(f"Best move: {move}")
-        servo_angles = map_move_to_robot_arm(move)
-        send_move_to_arduino(servo_angles)
+        send_move_to_arduino([90, 90, 90, 85, 0, 30])
+        time.sleep(5)
+
+        servo_angles_current, servo_angles_target = map_move_to_robot_arm(move)
+
+        servo_angles_current[5] = 30
+        send_move_to_arduino(servo_angles_current)
+        time.sleep(5)
+
+        servo_angles_current[5] = 5
+        send_move_to_arduino(servo_angles_current)
+        time.sleep(5)
+
+        send_move_to_arduino([90, 90, 90, 85, 0, 5])
+        time.sleep(5)
+
+        servo_angles_target[5] = 5
+        send_move_to_arduino(servo_angles_target)
+        time.sleep(5)
+
+        servo_angles_target[5] = 30
+        send_move_to_arduino(servo_angles_target)
+        time.sleep(5)
+
+        send_move_to_arduino([90, 90, 90, 85, 0, 30])
+        time.sleep(5)
         board.push(move)
-        time.sleep(5)  # Așteaptă finalizarea mișcării înainte de următoarea comandă
     except Exception as e:
         print(f"Error: {e}")
-    break
+    # break
