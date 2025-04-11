@@ -7,8 +7,8 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
 #define MAX_PULSE   600      // PWM maxim (poziție 180°)
 #define SERVO_COUNT 6        // Număr de servomotoare
 
-#define STEP_DELAY  2       // Delay între update-uri (ms)
-#define TOTAL_STEPS 1500      // Numărul total de pași pentru deplasarea completă
+#define STEP_DELAY  1       // Delay între update-uri (ms)
+#define TOTAL_STEPS 1500    // Numărul total de pași pentru deplasarea completă
 
 // Pozițiile actuale ale servomotoarelor
 int servo_positions[SERVO_COUNT] = {375, 375, 375, 375, 375, 375};
