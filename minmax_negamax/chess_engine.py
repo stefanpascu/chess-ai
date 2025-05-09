@@ -65,22 +65,7 @@ class GameState:
         # Pawn promotion
         if move.is_pawn_promotion:
             # Player turn
-            if (self.white_to_move and main.player_one) or (not self.white_to_move and main.player_two):
-                is_valid_piece = False
-                while not is_valid_piece:
-                    # TODO: solve this issue - chess engine breaks when promoted pawn is made a choice
-                    #  (the player can choose before reaching the last row), but works when he/she
-                    #  is forced to turn it into a queen
-                    # promoted_piece = input('Promote to Q(ueen), R(ook), B(ishop), or (k)N(ight):').upper()
-                    promoted_piece = "Q"
-                    if promoted_piece in ["Q", "N", "B", "R"]:
-                        is_valid_piece = True
-                    else:
-                        print(promoted_piece + ' is not valid input. Try again')
-
-            else:  # AI turn
-                promoted_piece = 'Q'
-
+            promoted_piece = 'Q'
             self.board[move.end_row][move.end_column] = move.piece_moved[0] + promoted_piece
 
         # En passant
@@ -114,7 +99,6 @@ class GameState:
         self.white_to_move = not self.white_to_move  # Switches turns
 
     def undo_move(self):
-        """Undos last move made"""
         if len(self.move_log) != 0:  # Makes sure that there is a move to undo
             move = self.move_log.pop()
             self.board[move.start_row][move.start_column] = move.piece_moved
@@ -155,7 +139,6 @@ class GameState:
             self.stalemate = False
 
     def get_valid_moves(self):
-        """Gets all moves considering checks"""
         valid_moves = []
         self.in_check, self.pins, self.checks = self.check_for_pins_and_checks()
 

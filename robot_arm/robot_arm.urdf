@@ -1,16 +1,15 @@
-<?xml version="1.0"?>
 <robot name="robot_arm">
   <!-- Base Link -->
   <link name="base_link">
     <inertial>
-      <origin rpy="1.5708 0 0" xyz="0  0"/>
-      <mass value="1.0"/>
+      <origin rpy="1.5708 0 0" xyz="0 0 0"/>
+      <!-- <mass value="1.0"/> -->
       <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
     </inertial>
     <visual>
       <origin rpy="1.5708 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="Base.STL" scale="0.01 0.01 0.01"/>
+        <mesh filename="Base.STL" scale="1 1 1"/>
       </geometry>
       <material name="gray">
         <color rgba="0.7 0.7 0.7 1"/>
@@ -19,7 +18,7 @@
     <collision>
       <origin rpy="1.5708 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="Base.STL" scale="0.01 0.01 0.01"/>
+        <mesh filename="Base.STL" scale="1 1 1"/>
       </geometry>
     </collision>
   </link>
