@@ -30,7 +30,7 @@ bool player_turn = true;
 
 int servo_pwm[SERVO_COUNT]  = {375, 375, 375, 375, 375, 375};
 int target_pwm[SERVO_COUNT];
-int speedDelay = 10;
+int speedDelay = 20;
 
 const int SIG_PINS[4] = { 6, 7, 8, 9 };
 const int ADDR_PINS[4][4] = {
@@ -43,13 +43,13 @@ const int ADDR_PINS[4][4] = {
 // PID Controller parameters
 float Kp[SERVO_COUNT] = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0};  // Proportional gain
 float Ki[SERVO_COUNT] = {0.005, 0.005, 0.005, 0.005, 0.005, 0.005};  // Integral gain
-float Kd[SERVO_COUNT] = {0.1, 0.1, 0.1, 0.1, 0.1, 0.1};  // Derivative gain
+float Kd[SERVO_COUNT] = {0.02, 0.02, 0.02, 0.02, 0.02, 0.02};  // Derivative gain
 
 // PID variables for each servo
 float previous_error[SERVO_COUNT] = {0, 0, 0, 0, 0, 0};
 float integral[SERVO_COUNT] = {0, 0, 0, 0, 0, 0};
 unsigned long last_time[SERVO_COUNT] = {0, 0, 0, 0, 0, 0};
-float dt = 0.01;  // 20ms default
+float dt = 0.02;  // 20ms default
 
 // Maximum change in PWM value per update
 #define MAX_PWM_CHANGE 3
@@ -111,10 +111,7 @@ void loop() {
     enterAiTurn();
   }
   else {  // AI_TURN
-    // Do whatever AI work is needed:
-    //   * e.g. read Serial, move servos, print MOVE_DONE, etc.
     ai_flow();
-    Serial.println("MOVE_DONE");
 
     // Immediately hand control back to the player
     enterPlayerTurn();
@@ -127,10 +124,12 @@ void ai_flow() {
       String cmd = waitForResponse();
       if (cmd.startsWith("A")) {
         break;
+      } else if (cmd.startsWith("C")) {
+        break;
       } else {
         parseAndSetTargets(cmd);
         smoothMoveSequentialPID();
-        Serial.print("MOVE_DONE");
+        Serial.println("MOVE_DONE");
       }
     } 
     // delay(5000);              // ← simulate your AI/servo‐move
@@ -162,25 +161,52 @@ void enterAiTurn() {
   // Serial.println("AI at play…");  // done inside loop if you prefer
 }
 
+// void read_sensors() {
+//   bool first_print = true;
+//   for (int channel = 0; channel < 16; channel++) {
+//     int values[4];
+
+//     for (int mux = 0; mux < 4; mux++) {
+//       for (int b = 0; b < 4; b++)
+//         digitalWrite(ADDR_PINS[mux][b], bitRead(channel, b));
+//       delay(5);
+//       values[mux] = digitalRead(SIG_PINS[mux]);
+//     }
+    
+//     for (int mux = 0; mux < 4; mux++) {
+//       if (first_print) {
+//         Serial.print(values[mux]);
+//         first_print = false;
+//       } else {
+//         Serial.print(" ");
+//         Serial.print(values[mux]);
+//       }
+//     }
+//   }
+//   Serial.println();
+// }
+
 void read_sensors() {
   bool first_print = true;
-  for (int channel = 0; channel < 16; channel++) {
-    int values[4];
 
-    for (int mux = 0; mux < 4; mux++) {
-      for (int b = 0; b < 4; b++)
+  // Outer loop over each MUX
+  for (int mux = 0; mux < 4; mux++) {
+    // Inner loop over the 16 channels on that MUX
+    for (int channel = 0; channel < 16; channel++) {
+      // Drive the 4 address pins for this channel
+      for (int b = 0; b < 4; b++) {
         digitalWrite(ADDR_PINS[mux][b], bitRead(channel, b));
+      }
       delay(5);
-      values[mux] = digitalRead(SIG_PINS[mux]);
-    }
-    
-    for (int mux = 0; mux < 4; mux++) {
+
+      // Read and immediately print
+      int v = digitalRead(SIG_PINS[mux]);
       if (first_print) {
-        Serial.print(values[mux]);
+        Serial.print(v);
         first_print = false;
       } else {
-        Serial.print(" ");
-        Serial.print(values[mux]);
+        Serial.print(' ');
+        Serial.print(v);
       }
     }
   }
@@ -232,14 +258,14 @@ void smoothMoveSequentialPID() {
         servo_pwm[i] += (int)pid_output;
         servo_pwm[i] = constrain(servo_pwm[i], servoSettings[i].minPulse, servoSettings[i].maxPulse);
 
-        Serial.print("S"); Serial.print(i);
-        Serial.print(" i=");   Serial.print(i);
-        Serial.print(" err=");   Serial.print(error);
-        Serial.print(" out=");   Serial.print(pid_output);
-        Serial.print(" pos=");   Serial.println(servo_pwm[i]);
+        // Serial.print("S"); Serial.print(i);
+        // Serial.print(" i=");   Serial.print(i);
+        // Serial.print(" err=");   Serial.print(error);
+        // Serial.print(" out=");   Serial.print(pid_output);
+        // Serial.print(" pos=");   Serial.println(servo_pwm[i]);
       } else {
-        Serial.print("S"); Serial.print(i);
-        Serial.println(" at target");
+        // Serial.print("S"); Serial.print(i);
+        // Serial.println(" at target");
 
         // close enough: snap to final target
         servo_pwm[i] = target_pwm[i];
@@ -273,14 +299,14 @@ void setPIDValues(const String &params) {
       previous_error[servoIdx] = 0;
       integral[servoIdx] = 0;
       
-      Serial.print("PID values for servo ");
-      Serial.print(servoIdx);
-      Serial.print(" set to P=");
-      Serial.print(p_gain);
-      Serial.print(", I=");
-      Serial.print(i_gain);
-      Serial.print(", D=");
-      Serial.println(d_gain);
+      // Serial.print("PID values for servo ");
+      // Serial.print(servoIdx);
+      // Serial.print(" set to P=");
+      // Serial.print(p_gain);
+      // Serial.print(", I=");
+      // Serial.print(i_gain);
+      // Serial.print(", D=");
+      // Serial.println(d_gain);
     }
   }
 }

@@ -13,7 +13,7 @@ forearm_length = 123.0  # L2: lungimea brațului inferior (cot la încheietură)
 claw_length = 120.0
 forearm_and_claw_error_margin_length = 15.0
 horizontal_and_vertical_error_margin_length = 22.6
-piece_grabbing_point_length = 10
+piece_grabbing_point_length = 20
 weight_error = 10
 
 # Unghiurile corespunzatoare fiecarui patrat

@@ -4,7 +4,6 @@ import time
 
 import chess
 import numpy as np
-import pybullet as p
 import serial
 from stable_baselines3 import PPO
 
@@ -21,7 +20,9 @@ INITIAL_STANCE_GRABBING = [90, 90 ,90 , 123, 0, 0]
 INITIAL_STANCE_NOT_GRABBING = [90, 90 ,90 , 123, 0, 25]
 
 board     = chess.Board()
-prev_occ  = chess.Board()
+bits = [1]*16 + [0]*32 + [1]*16
+prev_occ = np.array(list(map(int,bits))).reshape(8, 8)
+
 waiting_for_capture = False
 capture_sq          = None
 
@@ -37,54 +38,6 @@ engine = PPO.load(model_path)
 # Inițializează mediul de șah și tabla
 env = ChessEnv()
 board = chess.Board()
-
-##################### PYBULLET #####################
-def setup_pybullet():
-    p.connect(p.GUI)
-    p.setGravity(0, 0, -9.81)
-
-    robotStartPos = [0, 0, 0.1]  # Raised slightly to avoid collision with plane
-    robotStartOrientation = p.getQuaternionFromEuler([0, 0, 0])
-    global end_effector_index
-    end_effector_index = None
-
-    plane_id = p.loadURDF("robot_arm/plane.urdf")
-    global robot_id
-    robot_id = p.loadURDF("robot_arm/robot_arm.urdf", robotStartPos, robotStartOrientation, useFixedBase=True)
-
-
-def calculate_inverse_kinematics_pybullet(x, y, z, is_grabbing):
-    setup_pybullet()
-    # Definește poziția țintă ca un vector 3D
-    target_pos = [x, y, z]
-    # Folosește o orientare neutră (poți ajusta Eulerii după necesitate)
-    target_ori = p.getQuaternionFromEuler([0, 0, 0])
-
-    # Calculează valorile articulațiilor folosind kinematicile inverse din PyBullet
-    joint_angles = p.calculateInverseKinematics(robot_id, end_effector_index, target_pos, target_ori)
-
-    # Convertim valorile obținute din radiani în grade
-    joint_angles_deg = [math.degrees(a) for a in joint_angles]
-
-    # Exemplu de mapping: presupunem că servourile se corespunzător primelor 4 articulații,
-    # iar servo3 și servo5 sunt setate manual, similar cu funcția ta originală.
-    # (Mappingul poate fi ajustat conform configurației robotului tău.)
-    servo0 = joint_angles_deg[0]
-    servo1 = joint_angles_deg[1]
-    servo2 = joint_angles_deg[2]
-    servo4 = joint_angles_deg[3]  # Ajustează indexul în funcție de modelul tău
-    servo3 = 98  # Valoare fixă, similar codului tău
-    servo5 = 0 if is_grabbing else 15
-
-    return [
-        int(round(servo0)),
-        int(round(servo1)),
-        int(round(servo2)),
-        servo3,
-        int(round(servo4)),
-        servo5
-    ]
-####################################################
 
 
 def lay_piece(x, y, z):
@@ -206,7 +159,7 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
         servo4 = -a2 + weight_error
         # servo4 = -a2 + 35
     else:
-        # TODO use hardcoded angles
+        # TODO use hardcoded angles or calculate inverse kinematics for wrist
         print("################### HARDCODED ANGLES NOT WORKING YET ###################")
 
     if debug:
@@ -232,9 +185,7 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
 def decide_inverse_kinematics_calculation(x, y, z, is_grabbing, debug=False):
     calculation_type = "MANUAL"
     while True:
-        if calculation_type == "PYBULLET":
-            return calculate_inverse_kinematics_pybullet(x, y, z, is_grabbing)
-        elif calculation_type == "MANUAL":
+        if calculation_type == "MANUAL":
             return calculate_inverse_kinematics(x, y, z, is_grabbing, debug)
         elif calculation_type == "HARDCODED":
             file, rank = get_move_from_square_center(x, y, z)
@@ -299,21 +250,26 @@ def map_move_to_robot_arm(move, debug=False):
     return servo_angles_current, servo_angles_target
 
 
-def send_move_to_arduino(servo_angles):
+def send_move_to_arduino(servo_angles, timeout=10.0, debug=False):
     command = ",".join(str(angle) for angle in servo_angles) + "\n"
     arduino.reset_input_buffer()
     arduino.write(command.encode())
-    print(f"Sent command to Arduino: {command.strip()}")
-
-    # Așteaptă confirmarea de la Arduino ("MOVE_DONE")
-    response = ""
-    timeout = time.time() + 10  # Timeout de 10 secunde
-    while time.time() < timeout and response == "":
-        if arduino.in_waiting > 0:
-            response = arduino.readline().decode().strip()
-        time.sleep(0.1)
-    print("Arduino response:", response)
     arduino.flush()
+    if debug:
+        print(f"Sent command to Arduino: {command.strip()}")
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        line = arduino.readline().decode('utf-8', errors='ignore').strip()
+        if not line:
+            time.sleep(0.01)
+            continue
+        if debug:
+            print("⟵ Arduino says:", repr(line))
+        if line == "MOVE_DONE":
+            return
+
+    raise TimeoutError("Timed out waiting for MOVE_DONE")
 
 
 def parse_occupancy(line):
@@ -409,8 +365,8 @@ if __name__ == '__main__':
                 print(f"Error: {e}")
 
     else:
-        print("Starting…")
-
+        print("Game Started")
+        debug = True
         while True:
             raw = arduino.readline()
             if not raw:
@@ -420,24 +376,29 @@ if __name__ == '__main__':
             if occ is None:
                 continue
 
-            print(f"Occupation matrix: \n{occ}")
-            if prev_occ is None:
-                prev_occ = occ
-                continue
-
+            # if debug:
+                # print(f"prev_occ: \n{prev_occ}")
+                # print(f"occ: \n{occ}")
             src_sqs, dst_sqs = diff_squares(prev_occ, occ)
 
             board.turn = chess.WHITE
+
             if not waiting_for_capture:
-                # 1) Normal one‐to‐one move
+                if debug:
+                    print(f"src_sqs: {src_sqs}")
+                    print(f"dst_sqs: {dst_sqs}")
+                    print(f"len(src_sqs): {len(src_sqs)}")
+                    print(f"len(dst_sqs): {len(dst_sqs)}")
+
+                # Normal one‐to‐one move
                 if len(src_sqs) == 1 and len(dst_sqs) == 1:
                     mv = chess.Move(src_sqs[0], dst_sqs[0])
                     if mv in board.legal_moves:
                         board.push(mv)
-                        print("Move:", mv.uci())
+                        print("Move: ", mv.uci())
                     else:
                         print("Illegal move detected:", mv)
-                # 2) Possible capture: piece vanished but no arrival
+                # Possible capture: piece vanished but no arrival
                 elif len(src_sqs) == 1 and len(dst_sqs) == 0:
                     sq = src_sqs[0]
                     piece = board.piece_at(sq)
@@ -445,6 +406,10 @@ if __name__ == '__main__':
                     if piece and piece.color != board.turn:
                         waiting_for_capture = True
                         capture_sq = sq
+                        arduino.reset_input_buffer()
+                        # TODO make scenario where player captures piece ( does not work from arduino i think :> )
+                        arduino.write("CAPTURE_DETECTED\n".encode())
+                        arduino.flush()
                         print("Capture detected at", chess.square_name(sq),
                               "— waiting for the white arrival move")
                 # else: noise or multi‐move; ignore
@@ -461,44 +426,48 @@ if __name__ == '__main__':
                     waiting_for_capture = False
                     capture_sq = None
 
-            # after any push, check for game end
-            if board.is_checkmate():
-                winner = "Black" if board.turn == chess.WHITE else "White"
-                print("Checkmate!", winner, "wins.")
-                break
-            if board.is_stalemate():
-                print("Stalemate!")
-                break
-            if board.is_insufficient_material():
-                print("Draw by insufficient material.")
-                break
+            print(f"board: \n{board}")
+            if not waiting_for_capture:
+                # after any push, check for game end
+                if board.is_checkmate():
+                    winner = "Black" if board.turn == chess.WHITE else "White"
+                    print("Checkmate!", winner, "wins.")
+                    break
+                if board.is_stalemate():
+                    print("Stalemate!")
+                    break
+                if board.is_insufficient_material():
+                    print("Draw by insufficient material.")
+                    break
 
-            prev_occ = occ
+                prev_occ = occ
 
-            # AI response
-            board.turn = chess.BLACK
-            move = decide_move(board, "NM")
-            print(f"AI plays: {move}")
-            is_capture = board.is_capture(move)
-            board.push(move)
+                # AI response
+                board.turn = chess.BLACK
+                move = decide_move(board, "NM")
+                print(f"AI plays: {move}")
+                is_capture = board.is_capture(move)
+                board.push(move)
+                prev_occ[move.from_square // 8][move.from_square % 8] = 0
+                prev_occ[move.to_square // 8][move.to_square % 8] = 1
+                print(f"board: \n{board}")
 
-            commands = []
-            if is_capture:
-                removal_seq = map_capture_removal_to_robot_arm(move)
-                commands.extend(removal_seq)
+                commands = []
+                if is_capture:
+                    removal_seq = map_capture_removal_to_robot_arm(move)
+                    commands.extend(removal_seq)
 
-            commands.extend(map_move_to_angles(move))
-            commands.append("ALL_ANGLES_SENT")
+                commands.extend(map_move_to_angles(move))
+                commands.append("ALL_ANGLES_SENT")
 
-            arduino.reset_input_buffer()
+                arduino.reset_input_buffer()
 
-            for seq in commands:
-                print(f"angles: {seq}")
-                # send the next waypoint
-                send_move_to_arduino(seq)
+                for seq in commands:
+                    try:
+                        send_move_to_arduino(seq, timeout=15.0)
+                    except TimeoutError as e:
+                        # TODO find out why player has to wait until warning appears to be able to press button
+                        print("⚠️", e)
+                        break
 
-                # now block until the Arduino acknowledges completion
-                try:
-                    wait_for_move_done(timeout=30.0)
-                except TimeoutError as e:
-                    print("Warning:", e)
+# TODO test arm with servo-by-servo movement to stop the jittering
