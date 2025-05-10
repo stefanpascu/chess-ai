@@ -2,7 +2,6 @@
 # Should not exceed 5
 set_depth = 3
 
-
 ############################## RECOMMEND NO CHANGES ##############################
 piece_scores = {'K': 200.0, 'Q': 9.0, 'R': 5.0, 'B': 3.3, 'N': 3.2, 'P': 1.0}
 

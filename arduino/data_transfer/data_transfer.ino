@@ -3,8 +3,23 @@
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
 
-const int GREEN_LED = 10;
-const int RED_LED = 11;
+const int SIG_PIN_1 = 6;
+const int SIG_PIN_2 = 7;
+const int SIG_PIN_3 = 8;
+const int SIG_PIN_4 = 9;
+
+const int RED_LED         = 10;
+const int GREEN_LED       = 11;
+const int END_TURN_BUTTON = 12;
+const int DEBOUNCE_MS     = 50;
+
+enum Turn { PLAYER_TURN, AI_TURN };
+Turn currentTurn = PLAYER_TURN;
+
+int buttonState = 0;
+unsigned long lastDebounceTime = 0;
+const unsigned long debounceDelay = 50;
+bool player_turn = true;
 
 #define MIN_PULSE     150
 #define MAX_PULSE     600
@@ -16,6 +31,14 @@ const int RED_LED = 11;
 int servo_pwm[SERVO_COUNT]  = {375, 375, 375, 375, 375, 375};
 int target_pwm[SERVO_COUNT];
 int speedDelay = 10;
+
+const int SIG_PINS[4] = { 6, 7, 8, 9 };
+const int ADDR_PINS[4][4] = {
+  {22, 24, 26, 28},
+  {23, 25, 27, 29},
+  {30, 32, 34, 36},
+  {31, 33, 35, 37}
+};
 
 // PID Controller parameters
 float Kp[SERVO_COUNT] = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0};  // Proportional gain
@@ -52,32 +75,116 @@ void setup() {
   Serial.begin(9600);
   Wire.begin();
   pwm.begin();
+  for (int mux = 0; mux < 4; mux++)
+    for (int b = 0; b < 4; b++)
+      pinMode(ADDR_PINS[mux][b], OUTPUT);
+
+  for (int mux = 0; mux < 4; mux++)
+    pinMode(SIG_PINS[mux], INPUT);
   pwm.setPWMFreq(50);
+  player_turn = true;
+
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(RED_LED,   OUTPUT);
+  pinMode(END_TURN_BUTTON, INPUT_PULLUP);  // button to GND
+
+  // start with green on (ready), red off
+  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(RED_LED,   LOW);
+
   delay(10);
   Serial.println("Arduino ready");
+
+  // Start in player-turn
+  enterPlayerTurn();
 }
 
 void loop() {
-  if (Serial.available()) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
+  if (currentTurn == PLAYER_TURN) {
+    // BLOCK here until the player taps the button
+    while (digitalRead(END_TURN_BUTTON) == HIGH) { /* waiting for press */ }
+    delay(DEBOUNCE_MS);
+    while (digitalRead(END_TURN_BUTTON) == LOW)  { /* waiting for release */ }
+    delay(DEBOUNCE_MS);
 
-    if (cmd.startsWith("ss")) {
-      speedDelay = cmd.substring(2).toInt();
-      Serial.print("Speed set to ");
-      Serial.print(speedDelay);
-      Serial.println(" ms");
+    // Now switch to the AI’s turn
+    enterAiTurn();
+  }
+  else {  // AI_TURN
+    // Do whatever AI work is needed:
+    //   * e.g. read Serial, move servos, print MOVE_DONE, etc.
+    ai_flow();
+    Serial.println("MOVE_DONE");
+
+    // Immediately hand control back to the player
+    enterPlayerTurn();
+  }
+}
+
+void ai_flow() {
+    read_sensors();
+    while (true) {
+      String cmd = waitForResponse();
+      if (cmd.startsWith("A")) {
+        break;
+      } else {
+        parseAndSetTargets(cmd);
+        smoothMoveSequentialPID();
+        Serial.print("MOVE_DONE");
+      }
+    } 
+    // delay(5000);              // ← simulate your AI/servo‐move
+}
+
+String waitForResponse() {
+  // Wait until there’s at least one byte in the buffer
+  while (Serial.available() == 0) {
+    // nothing here — you could blink an LED or call yield() if you need background work
+  }
+  // Read until newline (you can change to '\r' or whatever your PC is sending)
+  String resp = Serial.readStringUntil('\n');
+  resp.trim();   // remove CR/LF or stray spaces
+  return resp;
+}
+
+// Helpers to centralize LED + state logic
+void enterPlayerTurn() {
+  currentTurn = PLAYER_TURN;
+  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(RED_LED,   LOW);
+  // Serial.println("HUMAN at play…");
+}
+
+void enterAiTurn() {
+  currentTurn = AI_TURN;
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(RED_LED,   HIGH);
+  // Serial.println("AI at play…");  // done inside loop if you prefer
+}
+
+void read_sensors() {
+  bool first_print = true;
+  for (int channel = 0; channel < 16; channel++) {
+    int values[4];
+
+    for (int mux = 0; mux < 4; mux++) {
+      for (int b = 0; b < 4; b++)
+        digitalWrite(ADDR_PINS[mux][b], bitRead(channel, b));
+      delay(5);
+      values[mux] = digitalRead(SIG_PINS[mux]);
     }
-    else {
-      digitalWrite(GREEN_LED, LOW);
-      digitalWrite(RED_LED, HIGH);
-      parseAndSetTargets(cmd);
-      smoothMoveSequentialPID();
-      Serial.println("MOVE_DONE");
-      digitalWrite(GREEN_LED, HIGH);
-      digitalWrite(RED_LED, LOW);
+    
+    for (int mux = 0; mux < 4; mux++) {
+      if (first_print) {
+        Serial.print(values[mux]);
+        first_print = false;
+      } else {
+        Serial.print(" ");
+        Serial.print(values[mux]);
+      }
     }
   }
+  Serial.println();
 }
 
 void parseAndSetTargets(const String &command) {
