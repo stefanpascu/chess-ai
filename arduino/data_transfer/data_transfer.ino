@@ -127,8 +127,8 @@ void ai_flow() {
       } else if (cmd.startsWith("C")) {
         break;
       } else {
-        parseAndSetTargets(cmd);
-        smoothMoveSequentialPID();
+        // parseAndSetTargets(cmd);
+        // smoothMoveSequentialPID();
         Serial.println("MOVE_DONE");
       }
     } 
@@ -160,31 +160,6 @@ void enterAiTurn() {
   digitalWrite(RED_LED,   HIGH);
   // Serial.println("AI at play…");  // done inside loop if you prefer
 }
-
-// void read_sensors() {
-//   bool first_print = true;
-//   for (int channel = 0; channel < 16; channel++) {
-//     int values[4];
-
-//     for (int mux = 0; mux < 4; mux++) {
-//       for (int b = 0; b < 4; b++)
-//         digitalWrite(ADDR_PINS[mux][b], bitRead(channel, b));
-//       delay(5);
-//       values[mux] = digitalRead(SIG_PINS[mux]);
-//     }
-    
-//     for (int mux = 0; mux < 4; mux++) {
-//       if (first_print) {
-//         Serial.print(values[mux]);
-//         first_print = false;
-//       } else {
-//         Serial.print(" ");
-//         Serial.print(values[mux]);
-//       }
-//     }
-//   }
-//   Serial.println();
-// }
 
 void read_sensors() {
   bool first_print = true;

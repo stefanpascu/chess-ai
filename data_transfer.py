@@ -161,6 +161,9 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
     else:
         # TODO use hardcoded angles or calculate inverse kinematics for wrist
         print("################### HARDCODED ANGLES NOT WORKING YET ###################")
+        servo1 = 90
+        servo2 = 90
+        servo4 = 90
 
     if debug:
         print("############################ MANUALLY CALCULATING INVERSE KINEMATICS ############################")
@@ -176,9 +179,9 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
         int(round(servo0)),
         int(round(servo1)),
         int(round(servo2)),
-        servo3,
+        int(round(servo3)),
         int(round(servo4)),
-        servo5
+        int(round(servo5))
     ]
 
 
@@ -251,25 +254,39 @@ def map_move_to_robot_arm(move, debug=False):
 
 
 def send_move_to_arduino(servo_angles, timeout=10.0, debug=False):
+    # 1) Build the command
     command = ",".join(str(angle) for angle in servo_angles) + "\n"
-    arduino.reset_input_buffer()
+
+    # 2) Non-blocking read so we don't block on readline forever:
+    #    Make sure you did something like `arduino.timeout = 0`
+    #    when you opened the port.
+    #
+    # 3) Drain any leftover bytes right before sending so we start "clean"
+    while arduino.in_waiting:
+        arduino.read(arduino.in_waiting)
+
+    # 4) Send it
     arduino.write(command.encode())
     arduino.flush()
     if debug:
-        print(f"Sent command to Arduino: {command.strip()}")
-    deadline = time.time() + timeout
+        print(f"→ Sent to Arduino: {command.strip()}")
 
+    # 5) Poll for the MOVE_DONE reply until our own Python timeout
+    deadline = time.time() + timeout
     while time.time() < deadline:
-        line = arduino.readline().decode('utf-8', errors='ignore').strip()
-        if not line:
+        # only attempt a readline if there's something waiting
+        if arduino.in_waiting:
+            line = arduino.readline().decode('utf-8', 'ignore').strip()
+            if debug:
+                print("⟵ Arduino says:", repr(line))
+            if line == "MOVE_DONE":
+                return
+        else:
+            # no data yet, give CPU a tiny break
             time.sleep(0.01)
-            continue
-        if debug:
-            print("⟵ Arduino says:", repr(line))
-        if line == "MOVE_DONE":
-            return
 
     raise TimeoutError("Timed out waiting for MOVE_DONE")
+
 
 
 def parse_occupancy(line):
@@ -327,6 +344,11 @@ def wait_for_move_done(timeout=15.0):
 
 if __name__ == '__main__':
     action = "run"
+    # state for non‐blocking Arduino‐arm moves
+    waiting_for_move_done = False
+    move_start_time = 0.0
+    move_timeout = 15.0  # or whatever you were passing into send_move_to_arduino
+
     if action == "test":
         initial_move = chess.Move.from_uci("b2h8")
         alternate_move = chess.Move.from_uci("a2d4")
@@ -368,6 +390,20 @@ if __name__ == '__main__':
         print("Game Started")
         debug = True
         while True:
+            # ——— Check for arm completion ———
+            if waiting_for_move_done:
+                if arduino.in_waiting:
+                    line = arduino.readline().decode('utf-8', 'ignore').strip()
+                    if line:
+                        print("⟵ Arduino says:", repr(line))
+                        if line == "MOVE_DONE":
+                            waiting_for_move_done = False
+                            print("⚙️  Arm has finished moving.")
+                elif time.time() > move_start_time + move_timeout:
+                    waiting_for_move_done = False
+                    print("❗️ Arm move timed out!")
+
+            # ——— Now proceed with your existing sensor + chess logic ———
             raw = arduino.readline()
             if not raw:
                 continue
@@ -383,6 +419,7 @@ if __name__ == '__main__':
 
             board.turn = chess.WHITE
 
+            # Player logic
             if not waiting_for_capture:
                 if debug:
                     print(f"src_sqs: {src_sqs}")
@@ -407,11 +444,11 @@ if __name__ == '__main__':
                         waiting_for_capture = True
                         capture_sq = sq
                         arduino.reset_input_buffer()
-                        # TODO make scenario where player captures piece ( does not work from arduino i think :> )
                         arduino.write("CAPTURE_DETECTED\n".encode())
                         arduino.flush()
                         print("Capture detected at", chess.square_name(sq),
                               "— waiting for the white arrival move")
+                        prev_occ = occ.copy()
                 # else: noise or multi‐move; ignore
             else:
                 # we were waiting for the capture‐finishing move
@@ -425,7 +462,10 @@ if __name__ == '__main__':
                         print("Illegal post‐capture move:", mv)
                     waiting_for_capture = False
                     capture_sq = None
+                else:
+                    print("The player was supposed to move a piece on the square where the captured piece was, but did not, which is illegal.")
 
+            # AI logic
             print(f"board: \n{board}")
             if not waiting_for_capture:
                 # after any push, check for game end
@@ -441,7 +481,6 @@ if __name__ == '__main__':
                     break
 
                 prev_occ = occ
-
                 # AI response
                 board.turn = chess.BLACK
                 move = decide_move(board, "NM")
@@ -462,12 +501,25 @@ if __name__ == '__main__':
 
                 arduino.reset_input_buffer()
 
+                # flush any stragglers, then send the entire sequence
+                arduino.reset_input_buffer()
                 for seq in commands:
-                    try:
-                        send_move_to_arduino(seq, timeout=15.0)
-                    except TimeoutError as e:
-                        # TODO find out why player has to wait until warning appears to be able to press button
-                        print("⚠️", e)
-                        break
+                    arduino.write((str(seq) + "\n").encode())
+                    arduino.flush()
 
-# TODO test arm with servo-by-servo movement to stop the jittering
+                waiting_for_move_done = True
+                move_start_time = time.time()
+                print("→ Sent all arm commands, awaiting MOVE_DONE…")
+
+                if board.is_checkmate():
+                    winner = "Black" if board.turn == chess.WHITE else "White"
+                    print("Checkmate!", winner, "wins.")
+                    break
+                if board.is_stalemate():
+                    print("Stalemate!")
+                    break
+                if board.is_insufficient_material():
+                    print("Draw by insufficient material.")
+                    break
+
+# TODO test arm with servo-by-servo movement to stop the jitter
