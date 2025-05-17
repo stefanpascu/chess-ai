@@ -254,27 +254,18 @@ def map_move_to_robot_arm(move, debug=False):
 
 
 def send_move_to_arduino(servo_angles, timeout=10.0, debug=False):
-    # 1) Build the command
-    command = ",".join(str(angle) for angle in servo_angles) + "\n"
+    command = " ".join(str(angle) for angle in servo_angles) + "\n"
 
-    # 2) Non-blocking read so we don't block on readline forever:
-    #    Make sure you did something like `arduino.timeout = 0`
-    #    when you opened the port.
-    #
-    # 3) Drain any leftover bytes right before sending so we start "clean"
     while arduino.in_waiting:
         arduino.read(arduino.in_waiting)
 
-    # 4) Send it
     arduino.write(command.encode())
     arduino.flush()
     if debug:
         print(f"→ Sent to Arduino: {command.strip()}")
 
-    # 5) Poll for the MOVE_DONE reply until our own Python timeout
     deadline = time.time() + timeout
     while time.time() < deadline:
-        # only attempt a readline if there's something waiting
         if arduino.in_waiting:
             line = arduino.readline().decode('utf-8', 'ignore').strip()
             if debug:
@@ -282,34 +273,27 @@ def send_move_to_arduino(servo_angles, timeout=10.0, debug=False):
             if line == "MOVE_DONE":
                 return
         else:
-            # no data yet, give CPU a tiny break
             time.sleep(0.01)
 
     raise TimeoutError("Timed out waiting for MOVE_DONE")
-
 
 
 def parse_occupancy(line):
     bits = line.split()
     if len(bits) != 64 or any(b not in ('0','1') for b in bits):
         return None
-    # turn into ints
     vals = list(map(int, bits))
-    # reshape into 8×8, assuming sensors send a1…h1,a2…h2,…,a8…h8:
     mat = np.array(vals, dtype=int).reshape((8,8))
     return mat
 
 
 def detect_move(prev, curr):
-    # source is where prev==1 and curr==0
     src_idx = np.where((prev==1)&(curr==0))
     dst_idx = np.where((prev==0)&(curr==1))
     if len(src_idx[0])==1 and len(dst_idx[0])==1:
-        # convert (row, col) to square index
-        # row 0 → rank 1, row 7 → rank 8; col 0 → file a
         sr, sc = src_idx[0][0], src_idx[1][0]
         dr, dc = dst_idx[0][0], dst_idx[1][0]
-        src_sq = chess.square(sc, sr)  # sc=file, sr=rank
+        src_sq = chess.square(sc, sr)
         dst_sq = chess.square(dc, dr)
         return chess.Move(src_sq, dst_sq)
     return None
@@ -344,10 +328,9 @@ def wait_for_move_done(timeout=15.0):
 
 if __name__ == '__main__':
     action = "run"
-    # state for non‐blocking Arduino‐arm moves
     waiting_for_move_done = False
     move_start_time = 0.0
-    move_timeout = 15.0  # or whatever you were passing into send_move_to_arduino
+    move_timeout = 30.0
 
     if action == "test":
         initial_move = chess.Move.from_uci("b2h8")
@@ -366,12 +349,6 @@ if __name__ == '__main__':
                 print(f"Best move: {move}")
                 # initial position: 90 90 90 123 0 25
                 # some    position: 70 70 30 98 60 40
-                # A1: 71 12 0 98 42 25
-                # A2: 70 14 0 98 28 25
-                # A3: 65 40 50 98 49 25
-                # A4: 62 50 68 98 54 25
-                # A5: 57 62 88 98 65 25
-                # A6: 53 70 101 98 71 25
 
                 input_move = input("Input move:\n")
                 if input_move == "init":
@@ -412,9 +389,6 @@ if __name__ == '__main__':
             if occ is None:
                 continue
 
-            # if debug:
-                # print(f"prev_occ: \n{prev_occ}")
-                # print(f"occ: \n{occ}")
             src_sqs, dst_sqs = diff_squares(prev_occ, occ)
 
             board.turn = chess.WHITE
@@ -427,7 +401,6 @@ if __name__ == '__main__':
                     print(f"len(src_sqs): {len(src_sqs)}")
                     print(f"len(dst_sqs): {len(dst_sqs)}")
 
-                # Normal one‐to‐one move
                 if len(src_sqs) == 1 and len(dst_sqs) == 1:
                     mv = chess.Move(src_sqs[0], dst_sqs[0])
                     if mv in board.legal_moves:
@@ -435,11 +408,9 @@ if __name__ == '__main__':
                         print("Move: ", mv.uci())
                     else:
                         print("Illegal move detected:", mv)
-                # Possible capture: piece vanished but no arrival
                 elif len(src_sqs) == 1 and len(dst_sqs) == 0:
                     sq = src_sqs[0]
                     piece = board.piece_at(sq)
-                    # only treat as capture if that piece was of the side to be captured
                     if piece and piece.color != board.turn:
                         waiting_for_capture = True
                         capture_sq = sq
@@ -449,10 +420,7 @@ if __name__ == '__main__':
                         print("Capture detected at", chess.square_name(sq),
                               "— waiting for the white arrival move")
                         prev_occ = occ.copy()
-                # else: noise or multi‐move; ignore
             else:
-                # we were waiting for the capture‐finishing move
-                # look for exactly one src+dst, and dst must be capture_sq
                 if len(src_sqs) == 1 and len(dst_sqs) == 1 and dst_sqs[0] == capture_sq:
                     mv = chess.Move(src_sqs[0], dst_sqs[0])
                     if mv in board.legal_moves:
@@ -468,7 +436,6 @@ if __name__ == '__main__':
             # AI logic
             print(f"board: \n{board}")
             if not waiting_for_capture:
-                # after any push, check for game end
                 if board.is_checkmate():
                     winner = "Black" if board.turn == chess.WHITE else "White"
                     print("Checkmate!", winner, "wins.")
@@ -481,7 +448,6 @@ if __name__ == '__main__':
                     break
 
                 prev_occ = occ
-                # AI response
                 board.turn = chess.BLACK
                 move = decide_move(board, "NM")
                 print(f"AI plays: {move}")
@@ -501,8 +467,21 @@ if __name__ == '__main__':
 
                 arduino.reset_input_buffer()
 
-                # flush any stragglers, then send the entire sequence
                 arduino.reset_input_buffer()
+                for seq in commands:
+                    if seq == "ALL_ANGLES_SENT":
+                        print(f"seq = {seq}")
+                        # arduino.write((seq + "\n").encode())
+                        send_move_to_arduino(seq, move_timeout, False)
+                    else:
+                        print(f"seq = {' '.join(map(str, seq))}")
+                        # arduino.write((' '.join(map(str, seq)) + "\n").encode())
+                        send_move_to_arduino(seq, move_timeout, False)
+                    arduino.flush()
+
+                waiting_for_move_done = True
+                move_start_time = time.time()
+                print("→ Sent all arm commands, awaiting MOVE_DONE…")
                 for seq in commands:
                     arduino.write((str(seq) + "\n").encode())
                     arduino.flush()
