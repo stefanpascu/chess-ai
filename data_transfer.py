@@ -17,7 +17,7 @@ from settings_measurements import board_origin_x, board_margin, square_size, bas
     forearm_and_claw_error_margin_length, weight_error
 
 INITIAL_STANCE_GRABBING = [90, 90 ,90 , 123, 0, 0]
-INITIAL_STANCE_NOT_GRABBING = [90, 90 ,90 , 123, 0, 25]
+INITIAL_STANCE_NOT_GRABBING = [90, 90 ,90 , 123, 0, 15]
 
 board     = chess.Board()
 bits = [1]*16 + [0]*32 + [1]*16
@@ -46,6 +46,9 @@ def lay_piece(x, y, z):
     servo_angles_target = decide_inverse_kinematics_calculation(x, y, z + settings_measurements.lift_piece_height, True, False)
     angles.append(servo_angles_target)
 
+    servo_angles_target[1] += settings_measurements.avoid_piece_collision_offset
+    angles.append(servo_angles_target)
+
     servo_angles_target = decide_inverse_kinematics_calculation(x, y, z, True, False)
     angles.append(servo_angles_target)
 
@@ -65,6 +68,9 @@ def pick_piece(x, y, z):
     angles = [INITIAL_STANCE_NOT_GRABBING]
 
     servo_angles_target = decide_inverse_kinematics_calculation(x, y, z + settings_measurements.lift_piece_height, False, False)
+    angles.append(servo_angles_target)
+
+    servo_angles_target[1] += settings_measurements.avoid_piece_collision_offset
     angles.append(servo_angles_target)
 
     servo_angles_target = decide_inverse_kinematics_calculation(x, y, z, False, False)
@@ -171,9 +177,9 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
         print("l: ", l)
         print("h: ", h)
 
-    servo0 = b
+    servo0 = b * 0.95
     servo3 = 123
-    servo5 = 0 if is_grabbing else 25
+    servo5 = 0 if is_grabbing else 15
 
     return [
         int(round(servo0)),
@@ -253,31 +259,6 @@ def map_move_to_robot_arm(move, debug=False):
     return servo_angles_current, servo_angles_target
 
 
-def send_move_to_arduino(servo_angles, timeout=10.0, debug=False):
-    command = " ".join(str(angle) for angle in servo_angles) + "\n"
-
-    while arduino.in_waiting:
-        arduino.read(arduino.in_waiting)
-
-    arduino.write(command.encode())
-    arduino.flush()
-    if debug:
-        print(f"→ Sent to Arduino: {command.strip()}")
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if arduino.in_waiting:
-            line = arduino.readline().decode('utf-8', 'ignore').strip()
-            if debug:
-                print("⟵ Arduino says:", repr(line))
-            if line == "MOVE_DONE":
-                return
-        else:
-            time.sleep(0.01)
-
-    raise TimeoutError("Timed out waiting for MOVE_DONE")
-
-
 def parse_occupancy(line):
     bits = line.split()
     if len(bits) != 64 or any(b not in ('0','1') for b in bits):
@@ -326,11 +307,37 @@ def wait_for_move_done(timeout=15.0):
             return
 
 
+def send_move_to_arduino(servo_angles, timeout=15.0, debug=False):
+    command = ",".join(str(angle) for angle in servo_angles) + "\n"
+
+    while arduino.in_waiting:
+        arduino.read(arduino.in_waiting)
+
+    arduino.write(command.encode())
+    arduino.flush()
+    if debug:
+        print(f"→ Sent to Arduino: {command.strip()}")
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if arduino.in_waiting:
+            line = arduino.readline().decode('utf-8', 'ignore').strip()
+            if debug:
+                print("⟵ Arduino says:", repr(line))
+            if line == "ALL_SERVOS_DONE":
+                print("⚙️  Arm has finished moving.")
+                return
+            if line == "MOVE_DONE":
+                return
+        else:
+            time.sleep(0.01)
+
+
 if __name__ == '__main__':
     action = "run"
     waiting_for_move_done = False
     move_start_time = 0.0
-    move_timeout = 30.0
+    move_timeout = 15.0
 
     if action == "test":
         initial_move = chess.Move.from_uci("b2h8")
@@ -339,26 +346,28 @@ if __name__ == '__main__':
         while not board.is_game_over():
             try:
                 print(board, "\n")
-                if move is None:
-                    print("No valid moves left. Game Over.")
-                    break
-                if move == initial_move:
-                    move = alternate_move
-                else:
-                    move = initial_move
-                print(f"Best move: {move}")
-                # initial position: 90 90 90 123 0 25
-                # some    position: 70 70 30 98 60 40
-
+                # initial position: 90 90 90 123 0 15
                 input_move = input("Input move:\n")
                 if input_move == "init":
-                    send_move_to_arduino([90, 90, 90, 123, 0, 25])
+                    send_move_to_arduino([90, 90, 90, 123, 0, 15], move_timeout, False)
                 elif input_move == "custom":
-                    send_move_to_arduino(input("Input custom angles:\n").split(" "))
+                    send_move_to_arduino(input("Input custom angles:\n").strip().split(" "), move_timeout, False)
+                    # send_move_to_arduino("ALL_ANGLES_SENT", move_timeout, False)
                 else:
                     move = chess.Move.from_uci(input_move)
-                    servo_angles_current, servo_angles_target = map_move_to_robot_arm(move, True)
-                    send_move_to_arduino(servo_angles_current)
+                    commands = []
+                    commands.extend(map_move_to_angles(move))
+                    commands.append("ALL_ANGLES_SENT")
+
+                    for seq in commands:
+                        if seq == "ALL_ANGLES_SENT":
+                            print(f"seq = {seq}")
+                            send_move_to_arduino(seq, move_timeout, False)
+                        else:
+                            print(f"seq = {' '.join(map(str, seq))}")
+                            send_move_to_arduino(seq, move_timeout, False)
+                        arduino.flush()
+
 
             except Exception as e:
                 print(f"Error: {e}")
@@ -367,20 +376,6 @@ if __name__ == '__main__':
         print("Game Started")
         debug = True
         while True:
-            # ——— Check for arm completion ———
-            if waiting_for_move_done:
-                if arduino.in_waiting:
-                    line = arduino.readline().decode('utf-8', 'ignore').strip()
-                    if line:
-                        print("⟵ Arduino says:", repr(line))
-                        if line == "MOVE_DONE":
-                            waiting_for_move_done = False
-                            print("⚙️  Arm has finished moving.")
-                elif time.time() > move_start_time + move_timeout:
-                    waiting_for_move_done = False
-                    print("❗️ Arm move timed out!")
-
-            # ——— Now proceed with your existing sensor + chess logic ———
             raw = arduino.readline()
             if not raw:
                 continue
@@ -465,30 +460,14 @@ if __name__ == '__main__':
                 commands.extend(map_move_to_angles(move))
                 commands.append("ALL_ANGLES_SENT")
 
-                arduino.reset_input_buffer()
-
-                arduino.reset_input_buffer()
                 for seq in commands:
                     if seq == "ALL_ANGLES_SENT":
                         print(f"seq = {seq}")
-                        # arduino.write((seq + "\n").encode())
                         send_move_to_arduino(seq, move_timeout, False)
                     else:
                         print(f"seq = {' '.join(map(str, seq))}")
-                        # arduino.write((' '.join(map(str, seq)) + "\n").encode())
                         send_move_to_arduino(seq, move_timeout, False)
                     arduino.flush()
-
-                waiting_for_move_done = True
-                move_start_time = time.time()
-                print("→ Sent all arm commands, awaiting MOVE_DONE…")
-                for seq in commands:
-                    arduino.write((str(seq) + "\n").encode())
-                    arduino.flush()
-
-                waiting_for_move_done = True
-                move_start_time = time.time()
-                print("→ Sent all arm commands, awaiting MOVE_DONE…")
 
                 if board.is_checkmate():
                     winner = "Black" if board.turn == chess.WHITE else "White"

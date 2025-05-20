@@ -28,7 +28,7 @@ bool player_turn = true;
 // index of the servo you want to move first (0 = first element in your parsed list)
 #define START_SERVO    1
 
-int servo_pwm[SERVO_COUNT]  = {375, 375, 375, 375, 375, 375};
+int servo_pwm[SERVO_COUNT]  = {315, 310, 310, 386, 105, 211};
 int target_pwm[SERVO_COUNT];
 int speedDelay = 20;
 
@@ -40,19 +40,9 @@ const int ADDR_PINS[4][4] = {
   {31, 33, 35, 37}
 };
 
-// PID Controller parameters
-float Kp[SERVO_COUNT] = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0};  // Proportional gain
-float Ki[SERVO_COUNT] = {0.005, 0.005, 0.005, 0.005, 0.005, 0.005};  // Integral gain
-float Kd[SERVO_COUNT] = {0.02, 0.02, 0.02, 0.02, 0.02, 0.02};  // Derivative gain
-
-// PID variables for each servo
-float previous_error[SERVO_COUNT] = {0, 0, 0, 0, 0, 0};
-float integral[SERVO_COUNT] = {0, 0, 0, 0, 0, 0};
-unsigned long last_time[SERVO_COUNT] = {0, 0, 0, 0, 0, 0};
-float dt = 0.02;  // 20ms default
-
 // Maximum change in PWM value per update
 #define MAX_PWM_CHANGE 3
+#define SERVO_SPEED 1
 
 struct ServoCalibration {
   int minPulse;
@@ -75,6 +65,9 @@ void setup() {
   Serial.begin(9600);
   Wire.begin();
   pwm.begin();
+  for (int i = 0; i < SERVO_COUNT; i++) {
+    pwm.setPWM(i, 0, servo_pwm[i]);
+  }
   for (int mux = 0; mux < 4; mux++)
     for (int b = 0; b < 4; b++)
       pinMode(ADDR_PINS[mux][b], OUTPUT);
@@ -123,16 +116,16 @@ void ai_flow() {
     while (true) {
       String cmd = waitForResponse();
       if (cmd.startsWith("A")) {
+        Serial.println("ALL_SERVOS_DONE");
         break;
       } else if (cmd.startsWith("C")) {
         break;
       } else {
-        // parseAndSetTargets(cmd);
-        // smoothMoveSequentialPID();
+        parseAndSetTargets(cmd);
+        smoothMoveSequential();
         Serial.println("MOVE_DONE");
       }
-    } 
-    // delay(5000);              // ← simulate your AI/servo‐move
+    }
 }
 
 String waitForResponse() {
@@ -151,14 +144,12 @@ void enterPlayerTurn() {
   currentTurn = PLAYER_TURN;
   digitalWrite(GREEN_LED, HIGH);
   digitalWrite(RED_LED,   LOW);
-  // Serial.println("HUMAN at play…");
 }
 
 void enterAiTurn() {
   currentTurn = AI_TURN;
   digitalWrite(GREEN_LED, LOW);
   digitalWrite(RED_LED,   HIGH);
-  // Serial.println("AI at play…");  // done inside loop if you prefer
 }
 
 void read_sensors() {
@@ -200,118 +191,41 @@ void parseAndSetTargets(const String &command) {
   }
 }
 
-// Sequential mover with PID control
-void smoothMoveSequentialPID() {
-  bool all_servos_done = false;
-  
-  // Reset PID variables before movement starts
-  for (int i = 0; i < SERVO_COUNT; i++) {
-    integral[i] = 0;
-    previous_error[i] = 0;
-    last_time[i] = 0;
-  }
-
+void smoothMoveSequential() {
   int firstServo = (target_pwm[1] >= servo_pwm[1]) ? 1 : 2;
   
-  while (!all_servos_done) {
-    all_servos_done = true;
+  // Move each servo one at a time until all servos reach their target positions
+  for (int step = 0; step < SERVO_COUNT; step++) {
+    int i = (firstServo + step) % SERVO_COUNT;
     
-    for (int step = 0; step < SERVO_COUNT; step++) {
-      int i = (firstServo + step) % SERVO_COUNT;
+    // Calculate step direction and size
+    int error = target_pwm[i] - servo_pwm[i];
+    
+    // Skip if already at target position
+    if (error == 0) {
+      continue;
+    }
+    
+    // Determine direction and use a constant speed
+    int direction = (error > 0) ? 1 : -1;
+    int constantSpeed = SERVO_SPEED;
+    
+    // Move this servo until it reaches its target
+    while (servo_pwm[i] != target_pwm[i]) {
+      // Calculate the step size (using a constant speed)
+      int step_size = min(constantSpeed, abs(target_pwm[i] - servo_pwm[i]));
       
-      // Calculate error
-      float error = target_pwm[i] - servo_pwm[i];
+      // Update servo position
+      servo_pwm[i] += direction * step_size;
       
-      // Only update if not at target position
-      if (abs(error) > MAX_PWM_CHANGE) {
-        all_servos_done = false;
-        
-        // Calculate PID output
-        float pid_output = calculatePID(i, error);
-        
-        // Update servo position
-        servo_pwm[i] += (int)pid_output;
-        servo_pwm[i] = constrain(servo_pwm[i], servoSettings[i].minPulse, servoSettings[i].maxPulse);
-
-        // Serial.print("S"); Serial.print(i);
-        // Serial.print(" i=");   Serial.print(i);
-        // Serial.print(" err=");   Serial.print(error);
-        // Serial.print(" out=");   Serial.print(pid_output);
-        // Serial.print(" pos=");   Serial.println(servo_pwm[i]);
-      } else {
-        // Serial.print("S"); Serial.print(i);
-        // Serial.println(" at target");
-
-        // close enough: snap to final target
-        servo_pwm[i] = target_pwm[i];
-      }
       // Apply the new position
       pwm.setPWM(i, 0, servo_pwm[i]);
-      delay(10);
+      
+      // Delay between steps
+      delay(speedDelay);
     }
     
-    delay(speedDelay);
+    // Extra delay between servo movements
+    delay(100);
   }
-}
-
-void setPIDValues(const String &params) {
-  int commaIndex1 = params.indexOf(',');
-  int commaIndex2 = params.indexOf(',', commaIndex1 + 1);
-  int commaIndex3 = params.indexOf(',', commaIndex2 + 1);
-  
-  if (commaIndex1 > 0 && commaIndex2 > 0 && commaIndex3 > 0) {
-    int servoIdx = params.substring(0, commaIndex1).toInt();
-    float p_gain = params.substring(commaIndex1 + 1, commaIndex2).toFloat();
-    float i_gain = params.substring(commaIndex2 + 1, commaIndex3).toFloat();
-    float d_gain = params.substring(commaIndex3 + 1).toFloat();
-    
-    if (servoIdx >= 0 && servoIdx < SERVO_COUNT) {
-      Kp[servoIdx] = p_gain;
-      Ki[servoIdx] = i_gain;
-      Kd[servoIdx] = d_gain;
-      
-      // Reset PID variables when changing gains
-      previous_error[servoIdx] = 0;
-      integral[servoIdx] = 0;
-      
-      // Serial.print("PID values for servo ");
-      // Serial.print(servoIdx);
-      // Serial.print(" set to P=");
-      // Serial.print(p_gain);
-      // Serial.print(", I=");
-      // Serial.print(i_gain);
-      // Serial.print(", D=");
-      // Serial.println(d_gain);
-    }
-  }
-}
-
-// Calculate PID output for a servo
-float calculatePID(int servoIdx, float error) {
-  unsigned long current_time = millis();
-  float dt_actual = (current_time - last_time[servoIdx]) / 1000.0;
-  
-  // Use the default dt if it's the first calculation or if time difference is too small
-  if (last_time[servoIdx] == 0 || dt_actual < 0.001) {
-    dt_actual = dt;
-  }
-  
-  // Calculate integral with anti-windup
-  integral[servoIdx] += error * dt_actual;
-  integral[servoIdx] = constrain(integral[servoIdx], -100, 100);  // Prevent integral windup
-  
-  // Calculate derivative
-  float derivative = (error - previous_error[servoIdx]) / dt_actual;
-  
-  // PID formula
-  float output = Kp[servoIdx] * error + 
-                 Ki[servoIdx] * integral[servoIdx] + 
-                 Kd[servoIdx] * derivative;
-  
-  // Store current values for next iteration
-  previous_error[servoIdx] = error;
-  last_time[servoIdx] = current_time;
-  
-  // Limit the maximum change in PWM value
-  return constrain(output, -MAX_PWM_CHANGE, MAX_PWM_CHANGE);
 }

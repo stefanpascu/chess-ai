@@ -5,6 +5,7 @@ board_margin = 0.0  # Marja de la marginea tablei până la zona de joc (mm)
 square_size = 30.0  # Latura fiecărui pătrat (mm)
 board_z = 6.0  # Înălțimea suprafeței tablei (mm)
 lift_piece_height = 45 # Inaltimea la care trebuie sa ajunga piesa pentru a nu darama alte piese
+avoid_piece_collision_offset = 30
 
 # Parametri ai brațului robotic (ipoteză, conform exemplului HowToMechatronics)
 base_height = 100.0  # H: înălțimea bazei (mm)
