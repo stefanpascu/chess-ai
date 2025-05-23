@@ -14,10 +14,10 @@ import settings_measurements
 from reinforcement_learning.chess_env import ChessEnv  # Mediul tău de șah personalizat
 from settings_measurements import board_origin_x, board_margin, square_size, base_height, piece_grabbing_point_length, \
     board_z, board_origin_y, claw_length, upper_arm_length, forearm_length, horizontal_and_vertical_error_margin_length, \
-    forearm_and_claw_error_margin_length, weight_error
+    forearm_and_claw_error_margin_length, weight_error, angle_errors
 
 INITIAL_STANCE_GRABBING = [90, 90 ,90 , 123, 0, 0]
-INITIAL_STANCE_NOT_GRABBING = [90, 90 ,90 , 123, 0, 15]
+INITIAL_STANCE_NOT_GRABBING = [90, 90 ,90 , 123, 0, 20]
 
 board     = chess.Board()
 bits = [1]*16 + [0]*32 + [1]*16
@@ -43,19 +43,19 @@ board = chess.Board()
 def lay_piece(x, y, z):
     angles = [INITIAL_STANCE_GRABBING]
 
-    servo_angles_target = decide_inverse_kinematics_calculation(x, y, z + settings_measurements.lift_piece_height, True, False)
+    servo_angles_target = calculate_inverse_kinematics(x, y, z + settings_measurements.lift_piece_height, True, False)
     angles.append(servo_angles_target)
 
     servo_angles_target[1] += settings_measurements.avoid_piece_collision_offset
     angles.append(servo_angles_target)
 
-    servo_angles_target = decide_inverse_kinematics_calculation(x, y, z, True, False)
+    servo_angles_target = calculate_inverse_kinematics(x, y, z, True, False)
     angles.append(servo_angles_target)
 
-    servo_angles_target = decide_inverse_kinematics_calculation(x, y, z, False, False)
+    servo_angles_target = calculate_inverse_kinematics(x, y, z, False, False)
     angles.append(servo_angles_target)
 
-    servo_angles_target = decide_inverse_kinematics_calculation(x, y, z + settings_measurements.lift_piece_height,
+    servo_angles_target = calculate_inverse_kinematics(x, y, z + settings_measurements.lift_piece_height,
                                                                               False, False)
     angles.append(servo_angles_target)
 
@@ -67,19 +67,19 @@ def lay_piece(x, y, z):
 def pick_piece(x, y, z):
     angles = [INITIAL_STANCE_NOT_GRABBING]
 
-    servo_angles_target = decide_inverse_kinematics_calculation(x, y, z + settings_measurements.lift_piece_height, False, False)
+    servo_angles_target = calculate_inverse_kinematics(x, y, z + settings_measurements.lift_piece_height, False, False)
     angles.append(servo_angles_target)
 
     servo_angles_target[1] += settings_measurements.avoid_piece_collision_offset
     angles.append(servo_angles_target)
 
-    servo_angles_target = decide_inverse_kinematics_calculation(x, y, z, False, False)
+    servo_angles_target = calculate_inverse_kinematics(x, y, z, False, False)
     angles.append(servo_angles_target)
 
-    servo_angles_target = decide_inverse_kinematics_calculation(x, y, z, True, False)
+    servo_angles_target = calculate_inverse_kinematics(x, y, z, True, False)
     angles.append(servo_angles_target)
 
-    servo_angles_target = decide_inverse_kinematics_calculation(x, y, z + settings_measurements.lift_piece_height,
+    servo_angles_target = calculate_inverse_kinematics(x, y, z + settings_measurements.lift_piece_height,
                                                                               True, False)
     angles.append(servo_angles_target)
 
@@ -129,11 +129,24 @@ def get_square_center(square, debug=False):
     return x, y, z
 
 
-def get_move_from_square_center(x, y, z):
-    file = (board_origin_x - board_margin - x) / square_size - 0.5
-    rank = -((y - board_origin_y - board_margin) / square_size - 8) - 0.5
-    print("file: ", file, "rank: ", rank)
-    return file, rank
+def get_move_from_square_center(x, y, debug=False):
+    try :
+        file_number = int(round((board_origin_x - board_margin - x) / square_size - 0.5))
+        file = chr(ord('a') + file_number)
+        rank = int(round((-((y - board_origin_y - board_margin) / square_size - 8) - 0.5) + 1))
+        if debug:
+            print(f"file_number: {file_number}")
+            print(f"file: {file}")
+            print(f"rank: {rank}")
+            print("file: ", file, "rank: ", rank)
+        return str(file) + str(rank)
+    except (ValueError, TypeError) as e:
+        print("Error converting to board square:", e)
+        return None
+    except Exception as e:
+        print("Unexpected error:", e)
+        return None
+
 
 
 def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
@@ -165,23 +178,21 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
         servo4 = -a2 + weight_error
         # servo4 = -a2 + 35
     else:
-        # TODO use hardcoded angles or calculate inverse kinematics for wrist
-        print("################### HARDCODED ANGLES NOT WORKING YET ###################")
-        servo1 = 90
-        servo2 = 90
-        servo4 = 90
+        print("fully hardcoded")
+        servo1 = 0
+        servo2 = 0
+        servo4 = 0
 
     if debug:
-        print("############################ MANUALLY CALCULATING INVERSE KINEMATICS ############################")
         print("b: ", b)
         print("l: ", l)
         print("h: ", h)
 
     servo0 = b * 0.95
     servo3 = 123
-    servo5 = 0 if is_grabbing else 15
+    servo5 = 0 if is_grabbing else 20
 
-    return [
+    servos = [
         int(round(servo0)),
         int(round(servo1)),
         int(round(servo2)),
@@ -190,18 +201,10 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
         int(round(servo5))
     ]
 
+    for index in range(6):
+        servos[index] = servos[index] + angle_errors[get_move_from_square_center(x, y, debug)][index]
 
-def decide_inverse_kinematics_calculation(x, y, z, is_grabbing, debug=False):
-    calculation_type = "MANUAL"
-    while True:
-        if calculation_type == "MANUAL":
-            return calculate_inverse_kinematics(x, y, z, is_grabbing, debug)
-        elif calculation_type == "HARDCODED":
-            file, rank = get_move_from_square_center(x, y, z)
-            aux = chess.square_name(chess.square(int(file), int(rank)))
-            return settings_measurements.angles[str(aux)]
-        else:
-            print("Invalid calculation type for inverse kinematics")
+    return servos
 
 
 def get_observation_from_board(board):
@@ -244,14 +247,14 @@ def decide_move(board, ai_type):
 def map_move_to_robot_arm(move, debug=False):
     current_square = move.from_square
     current_x, current_y, current_z = get_square_center(current_square, debug)
-    servo_angles_current = decide_inverse_kinematics_calculation(current_x, current_y, current_z, False, debug)
+    servo_angles_current = calculate_inverse_kinematics(current_x, current_y, current_z, False, debug)
     if debug:
         print(f"Current square center coordinates: x={current_x}, y={current_y}, z={current_z}")
         print(f"Calculated servo angles: {servo_angles_current}")
 
     target_square = move.to_square
     target_x, target_y, target_z = get_square_center(target_square, debug)
-    servo_angles_target = decide_inverse_kinematics_calculation(target_x, target_y, target_z, True, debug)
+    servo_angles_target = calculate_inverse_kinematics(target_x, target_y, target_z, True, debug)
     if debug:
         print(f"Target square center coordinates: x={target_x}, y={target_y}, z={target_z}")
         print(f"Calculated servo angles: {servo_angles_target}")
@@ -334,7 +337,7 @@ def send_move_to_arduino(servo_angles, timeout=15.0, debug=False):
 
 
 if __name__ == '__main__':
-    action = "run"
+    action = "test"
     waiting_for_move_done = False
     move_start_time = 0.0
     move_timeout = 15.0
@@ -346,16 +349,20 @@ if __name__ == '__main__':
         while not board.is_game_over():
             try:
                 print(board, "\n")
-                # initial position: 90 90 90 123 0 15
+                # initial position: 90 90 90 123 0 20
                 input_move = input("Input move:\n")
                 if input_move == "init":
-                    send_move_to_arduino([90, 90, 90, 123, 0, 15], move_timeout, False)
+                    send_move_to_arduino([90, 90, 90, 123, 0, 20], move_timeout, False)
                 elif input_move == "custom":
                     send_move_to_arduino(input("Input custom angles:\n").strip().split(" "), move_timeout, False)
                     # send_move_to_arduino("ALL_ANGLES_SENT", move_timeout, False)
                 else:
                     move = chess.Move.from_uci(input_move)
                     commands = []
+                    x, y, z = get_square_center(move.from_square)
+                    print(f"from_square_angles: {str(calculate_inverse_kinematics(x, y, z, False, False)).replace(',', '')}")
+                    x, y, z = get_square_center(move.to_square)
+                    print(f"to_square_angles: {str(calculate_inverse_kinematics(x, y, z, False, False)).replace(',', '')}")
                     commands.extend(map_move_to_angles(move))
                     commands.append("ALL_ANGLES_SENT")
 
@@ -479,5 +486,3 @@ if __name__ == '__main__':
                 if board.is_insufficient_material():
                     print("Draw by insufficient material.")
                     break
-
-# TODO test arm with servo-by-servo movement to stop the jitter
