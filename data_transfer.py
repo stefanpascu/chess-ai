@@ -351,30 +351,32 @@ if __name__ == '__main__':
                 print(board, "\n")
                 # initial position: 90 90 90 123 0 20
                 input_move = input("Input move:\n")
-                if input_move == "init":
-                    send_move_to_arduino([90, 90, 90, 123, 0, 20], move_timeout, False)
-                elif input_move == "custom":
-                    send_move_to_arduino(input("Input custom angles:\n").strip().split(" "), move_timeout, False)
+                if input_move[0].isalpha():
+                    if input_move == "init":
+                        send_move_to_arduino([90, 90, 90, 123, 0, 20], move_timeout, False)
+                    else:
+                        move = chess.Move.from_uci(input_move)
+                        commands = []
+                        x, y, z = get_square_center(move.from_square)
+                        print(
+                            f"from_square_angles: {str(calculate_inverse_kinematics(x, y, z, False, False)).replace(',', '')}")
+                        x, y, z = get_square_center(move.to_square)
+                        print(
+                            f"to_square_angles: {str(calculate_inverse_kinematics(x, y, z, False, False)).replace(',', '')}")
+                        commands.extend(map_move_to_angles(move))
+                        commands.append("ALL_ANGLES_SENT")
+
+                        for seq in commands:
+                            if seq == "ALL_ANGLES_SENT":
+                                print(f"seq = {seq}")
+                                send_move_to_arduino(seq, move_timeout, False)
+                            else:
+                                print(f"seq = {' '.join(map(str, seq))}")
+                                send_move_to_arduino(seq, move_timeout, False)
+                            arduino.flush()
+                elif input_move[0].isdigit():
+                    send_move_to_arduino(input_move.strip().split(" "), move_timeout, False)
                     # send_move_to_arduino("ALL_ANGLES_SENT", move_timeout, False)
-                else:
-                    move = chess.Move.from_uci(input_move)
-                    commands = []
-                    x, y, z = get_square_center(move.from_square)
-                    print(f"from_square_angles: {str(calculate_inverse_kinematics(x, y, z, False, False)).replace(',', '')}")
-                    x, y, z = get_square_center(move.to_square)
-                    print(f"to_square_angles: {str(calculate_inverse_kinematics(x, y, z, False, False)).replace(',', '')}")
-                    commands.extend(map_move_to_angles(move))
-                    commands.append("ALL_ANGLES_SENT")
-
-                    for seq in commands:
-                        if seq == "ALL_ANGLES_SENT":
-                            print(f"seq = {seq}")
-                            send_move_to_arduino(seq, move_timeout, False)
-                        else:
-                            print(f"seq = {' '.join(map(str, seq))}")
-                            send_move_to_arduino(seq, move_timeout, False)
-                        arduino.flush()
-
 
             except Exception as e:
                 print(f"Error: {e}")
