@@ -178,7 +178,6 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
         servo4 = -a2 + weight_error
         # servo4 = -a2 + 35
     else:
-        print("fully hardcoded")
         servo1 = 0
         servo2 = 0
         servo4 = 0
@@ -337,7 +336,7 @@ def send_move_to_arduino(servo_angles, timeout=15.0, debug=False):
 
 
 if __name__ == '__main__':
-    action = "test"
+    action = "run"
     waiting_for_move_done = False
     move_start_time = 0.0
     move_timeout = 15.0
