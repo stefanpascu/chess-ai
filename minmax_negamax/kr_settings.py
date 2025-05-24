@@ -1,11 +1,9 @@
-# Depth of the algorithm determining AI moves. Higher set_depth == harder AI. Lower if engine is too slow.
-# Should not exceed 5
-set_depth = 3
+import settings
 
-############################## RECOMMEND NO CHANGES ##############################
+set_depth = settings.minmax_negamax_depth
+
 piece_scores = {'K': 200.0, 'Q': 9.0, 'R': 5.0, 'B': 3.3, 'N': 3.2, 'P': 1.0}
 
-# Positive values are good for white, negative for black. i.e. black checkmate = -1000
 checkmate_points = 1000
 stalemate_points = 0
 
@@ -100,7 +98,7 @@ piece_positions = {
         [-1.0, 0.0, 0.5, 0.5, 0.5, 0.5, 0.0, -1.0],
         [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0],
         [-2.0, -1.0, -1.0, -0.5, -0.5, -1.0, -1.0, -2.0]],
-    'wK': [  # Uses chessprogramming.org King middle game values
+    'wK': [
         [-3.0, -4.0, -4.0, -5.0, -5.0, -4.0, -4.0, -3.0],
         [-3.0, -4.0, -4.0, -5.0, -5.0, -4.0, -4.0, -3.0],
         [-3.0, -4.0, -4.0, -5.0, -5.0, -4.0, -4.0, -3.0],
@@ -109,7 +107,7 @@ piece_positions = {
         [-1.0, -2.0, -2.0, -2.0, -2.0, -2.0, -2.0, -1.0],
         [2.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0],
         [2.0, 3.0, 1.0, 0.0, 0.0, 1.0, 3.0, 2.0]],
-    'bK': [  # Uses chessprogramming.org King middle game values
+    'bK': [
         [2.0, 3.0, 1.0, 0.0, 0.0, 1.0, 3.0, 2.0],
         [2.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0],
         [-1.0, -2.0, -2.0, -2.0, -2.0, -2.0, -2.0, -1.0],

@@ -1,7 +1,6 @@
 import chess
 import negamax as ai
 
-# Player settings. Set to True if a human is playing that color.
 player_white = True
 player_black = False
 
@@ -9,10 +8,8 @@ def main():
     board = chess.Board()
 
     while True:
-        # Print the board to the console
         print(board, "\n")
 
-        # Check for end of game
         if board.is_checkmate():
             winner = "Black" if board.turn == chess.WHITE else "White"
             print(f"Checkmate! {winner} wins.")
@@ -28,7 +25,6 @@ def main():
                      (board.turn == chess.BLACK and player_black)
 
         if human_turn:
-            # Ask the user for a move in UCI format, e.g. "e2e4"
             move_uci = input("Your move (in UCI, e.g. e2e4): ").strip()
             try:
                 move = chess.Move.from_uci(move_uci)
@@ -42,7 +38,6 @@ def main():
 
             board.push(move)
         else:
-            # Let your negamax AI choose a move
             legal_moves = list(board.legal_moves)
             ai_move = ai.find_best_move(board, legal_moves)
             if ai_move is None:

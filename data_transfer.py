@@ -1,25 +1,19 @@
 import math
 import os
 import time
-
 import chess
-import numpy as np
 import serial
-from stable_baselines3 import PPO
-
+import settings
+import numpy as np
 import minmax_negamax.negamax as ai_negamax
-
-import reinforcement_learning.settings as settings
-import settings_measurements
-from reinforcement_learning.chess_env import ChessEnv  # Mediul tău de șah personalizat
-from settings_measurements import board_origin_x, board_margin, square_size, base_height, piece_grabbing_point_length, \
+import reinforcement_learning.rl_settings as rl_settings
+from stable_baselines3 import PPO
+from reinforcement_learning.chess_env import ChessEnv
+from settings import board_origin_x, board_margin, square_size, base_height, piece_grabbing_point_length, \
     board_z, board_origin_y, claw_length, upper_arm_length, forearm_length, horizontal_and_vertical_error_margin_length, \
-    forearm_and_claw_error_margin_length, weight_error, angle_errors
+    weight_error, angle_errors
 
-INITIAL_STANCE_GRABBING = [90, 90 ,90 , 123, 0, 0]
-INITIAL_STANCE_NOT_GRABBING = [90, 90 ,90 , 123, 0, 20]
-
-board     = chess.Board()
+board = chess.Board()
 bits = [1]*16 + [0]*32 + [1]*16
 prev_occ = np.array(list(map(int,bits))).reshape(8, 8)
 
@@ -27,26 +21,24 @@ waiting_for_capture = False
 capture_sq          = None
 
 arduino = serial.Serial('COM5', 9600, timeout=1)
-time.sleep(2)  # Așteaptă stabilizarea conexiunii
+time.sleep(2)
 
-# Încarcă modelul AI (PPO) de șah
-model_path = os.path.join("reinforcement_learning", settings.best_model_path) if os.path.exists(
-    os.path.join("reinforcement_learning", settings.best_model_path)
-) else os.path.join("reinforcement_learning", settings.reinforced_model_path)
+model_path = os.path.join("reinforcement_learning", rl_settings.best_model_path) if os.path.exists(
+    os.path.join("reinforcement_learning", rl_settings.best_model_path)
+) else os.path.join("reinforcement_learning", rl_settings.reinforced_model_path)
 engine = PPO.load(model_path)
 
-# Inițializează mediul de șah și tabla
 env = ChessEnv()
 board = chess.Board()
 
 
 def lay_piece(x, y, z):
-    angles = [INITIAL_STANCE_GRABBING]
+    angles = [settings.initial_stance_grabbing]
 
-    servo_angles_target = calculate_inverse_kinematics(x, y, z + settings_measurements.lift_piece_height, True, False)
+    servo_angles_target = calculate_inverse_kinematics(x, y, z + settings.lift_piece_height, True, False)
     angles.append(servo_angles_target)
 
-    servo_angles_target[1] += settings_measurements.avoid_piece_collision_offset
+    servo_angles_target[1] += settings.avoid_piece_collision_offset
     angles.append(servo_angles_target)
 
     servo_angles_target = calculate_inverse_kinematics(x, y, z, True, False)
@@ -54,23 +46,26 @@ def lay_piece(x, y, z):
 
     servo_angles_target = calculate_inverse_kinematics(x, y, z, False, False)
     angles.append(servo_angles_target)
-
-    servo_angles_target = calculate_inverse_kinematics(x, y, z + settings_measurements.lift_piece_height,
-                                                                              False, False)
+    if int(y) != settings.second_line_y_in_cm:
+        servo_angles_target = calculate_inverse_kinematics(x, y, z + settings.lift_piece_height,
+                                                           True, False)
+    else:
+        servo_angles_target = calculate_inverse_kinematics(x, y, z,
+                                                           True, False)
     angles.append(servo_angles_target)
 
-    angles.append(INITIAL_STANCE_NOT_GRABBING)
+    angles.append(settings.initial_stance_not_grabbing)
 
     return angles
 
 
 def pick_piece(x, y, z):
-    angles = [INITIAL_STANCE_NOT_GRABBING]
+    angles = [settings.initial_stance_not_grabbing]
 
-    servo_angles_target = calculate_inverse_kinematics(x, y, z + settings_measurements.lift_piece_height, False, False)
+    servo_angles_target = calculate_inverse_kinematics(x, y, z + settings.lift_piece_height, False, False)
     angles.append(servo_angles_target)
 
-    servo_angles_target[1] += settings_measurements.avoid_piece_collision_offset
+    servo_angles_target[1] += settings.avoid_piece_collision_offset
     angles.append(servo_angles_target)
 
     servo_angles_target = calculate_inverse_kinematics(x, y, z, False, False)
@@ -78,12 +73,14 @@ def pick_piece(x, y, z):
 
     servo_angles_target = calculate_inverse_kinematics(x, y, z, True, False)
     angles.append(servo_angles_target)
-
-    servo_angles_target = calculate_inverse_kinematics(x, y, z + settings_measurements.lift_piece_height,
+    if int(y) != settings.second_line_y_in_cm:
+        servo_angles_target = calculate_inverse_kinematics(x, y, z + settings.lift_piece_height,
                                                                               True, False)
+    else:
+        servo_angles_target = calculate_inverse_kinematics(x, y, z,
+                                                           True, False)
     angles.append(servo_angles_target)
-
-    angles.append(INITIAL_STANCE_GRABBING)
+    angles.append(settings.initial_stance_grabbing)
 
     return angles
 
@@ -108,21 +105,21 @@ def map_capture_removal_to_robot_arm(move):
 
     angles = pick_piece(target_x, target_y, target_z)
 
-    angles.append([0, 90, 90, 123, 0, 0])
-    angles.append([0, 90, 90, 123, 0, 35])
-    angles.append(INITIAL_STANCE_NOT_GRABBING)
+    angles.append(settings.captured_piece_dropping_point_closed)
+    angles.append(settings.captured_piece_dropping_point_open)
+    angles.append(settings.initial_stance_not_grabbing)
 
     return angles
 
 
 def get_square_center(square, debug=False):
-    file = chess.square_file(square)  # 0-7 (A-H)
-    rank = chess.square_rank(square)  # 0-7 (rândul 1 este 0)
+    file = chess.square_file(square)
+    rank = chess.square_rank(square)
     x = board_origin_x - board_margin - ((file + 0.5) * square_size)
     y = board_origin_y + board_margin + ((8 - (rank + 0.5)) * square_size)
     z = claw_length + board_z + piece_grabbing_point_length - base_height
     if debug:
-        print("############################ GET SQUARE CENTER ############################")
+        print("############################ CENTRUL PATRATULUI ############################")
         print("file: ", file)
         print("rank: ", rank)
         print("x: {x} \ny: {y} \nz: {z} \n".format(x = x, y = y, z = z))
@@ -141,10 +138,10 @@ def get_move_from_square_center(x, y, debug=False):
             print("file: ", file, "rank: ", rank)
         return str(file) + str(rank)
     except (ValueError, TypeError) as e:
-        print("Error converting to board square:", e)
+        print("Eroare la transformarea in patrat al tablei:", e)
         return None
     except Exception as e:
-        print("Unexpected error:", e)
+        print("Eroare neasteptata:", e)
         return None
 
 
@@ -152,7 +149,7 @@ def get_move_from_square_center(x, y, debug=False):
 def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
     b = math.degrees(math.atan2(y, x))
     l = math.sqrt(x * x + y * y) - horizontal_and_vertical_error_margin_length
-    z = z + (l / 10) # offset for the weight of the arm
+    z = z + (l / weight_error)
     h = math.sqrt(l * l + z * z)
 
     if h <= (upper_arm_length + forearm_length):
@@ -172,11 +169,9 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
             print("theta: ", theta)
             print("a1: ", a1)
             print("a2: ", a2)
-        # servo1 = a1 + 8
         servo1 = a1
         servo2 = (a1 - a2)
         servo4 = -a2 + weight_error
-        # servo4 = -a2 + 35
     else:
         servo1 = 0
         servo2 = 0
@@ -187,9 +182,9 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
         print("l: ", l)
         print("h: ", h)
 
-    servo0 = b * 0.95
-    servo3 = 123
-    servo5 = 0 if is_grabbing else 20
+    servo0 = b * settings.base_servo_error_exponent
+    servo3 = settings.wrist_sideways_angle
+    servo5 = settings.claw_closed if is_grabbing else settings.claw_open
 
     servos = [
         int(round(servo0)),
@@ -226,7 +221,7 @@ def get_observation_from_board(board):
 def decide_move(board, ai_type):
     legal_moves = list(board.legal_moves)
     if not legal_moves:
-        return None # game is over
+        return None
     selected_move = None
     if ai_type == "RL":
         observation = get_observation_from_board(board)  # (12,8,8)
@@ -248,15 +243,15 @@ def map_move_to_robot_arm(move, debug=False):
     current_x, current_y, current_z = get_square_center(current_square, debug)
     servo_angles_current = calculate_inverse_kinematics(current_x, current_y, current_z, False, debug)
     if debug:
-        print(f"Current square center coordinates: x={current_x}, y={current_y}, z={current_z}")
-        print(f"Calculated servo angles: {servo_angles_current}")
+        print(f"Coordonatele curente ale patratului: x={current_x}, y={current_y}, z={current_z}")
+        print(f"Unghiurile servo calculate: {servo_angles_current}")
 
     target_square = move.to_square
     target_x, target_y, target_z = get_square_center(target_square, debug)
     servo_angles_target = calculate_inverse_kinematics(target_x, target_y, target_z, True, debug)
     if debug:
-        print(f"Target square center coordinates: x={target_x}, y={target_y}, z={target_z}")
-        print(f"Calculated servo angles: {servo_angles_target}")
+        print(f"Coordonatele doreite ale patratului: x={target_x}, y={target_y}, z={target_z}")
+        print(f"Unghiurile servo calculate: {servo_angles_target}")
 
     return servo_angles_current, servo_angles_target
 
@@ -318,16 +313,16 @@ def send_move_to_arduino(servo_angles, timeout=15.0, debug=False):
     arduino.write(command.encode())
     arduino.flush()
     if debug:
-        print(f"→ Sent to Arduino: {command.strip()}")
+        print(f"→ Trimitere catre Arduino: {command.strip()}")
 
     deadline = time.time() + timeout
     while time.time() < deadline:
         if arduino.in_waiting:
             line = arduino.readline().decode('utf-8', 'ignore').strip()
             if debug:
-                print("⟵ Arduino says:", repr(line))
-            if line == "ALL_SERVOS_DONE":
-                print("⚙️  Arm has finished moving.")
+                print("⟵ Arduino:", repr(line))
+            if line == settings.all_servos_done_message:
+                print("⚙️  Bratul a terminat mutarea.")
                 return
             if line == "MOVE_DONE":
                 return
@@ -336,7 +331,7 @@ def send_move_to_arduino(servo_angles, timeout=15.0, debug=False):
 
 
 if __name__ == '__main__':
-    action = "run"
+    action = settings.flow_state
     waiting_for_move_done = False
     move_start_time = 0.0
     move_timeout = 15.0
@@ -348,12 +343,11 @@ if __name__ == '__main__':
         while not board.is_game_over():
             try:
                 print(board, "\n")
-                # initial position: 90 90 90 123 0 20
-                input_move = input("Input move:\n")
+                input_move = input("Introduceti mutarea:\n")
                 if input_move[0].isalpha():
                     if input_move == "init":
                         send_move_to_arduino([90, 90, 90, 123, 0, 20], move_timeout, False)
-                    else:
+                    elif len(input_move) == 4:
                         move = chess.Move.from_uci(input_move)
                         commands = []
                         x, y, z = get_square_center(move.from_square)
@@ -363,10 +357,25 @@ if __name__ == '__main__':
                         print(
                             f"to_square_angles: {str(calculate_inverse_kinematics(x, y, z, False, False)).replace(',', '')}")
                         commands.extend(map_move_to_angles(move))
-                        commands.append("ALL_ANGLES_SENT")
+                        commands.append(settings.all_angles_sent_message)
 
                         for seq in commands:
-                            if seq == "ALL_ANGLES_SENT":
+                            if seq == settings.all_angles_sent_message:
+                                print(f"seq = {seq}")
+                                send_move_to_arduino(seq, move_timeout, False)
+                            else:
+                                print(f"seq = {' '.join(map(str, seq))}")
+                                send_move_to_arduino(seq, move_timeout, False)
+                            arduino.flush()
+                    elif len(input_move) == 2:
+                        commands = []
+                        square = chess.parse_square(input_move)
+                        x, y, z = get_square_center(square)
+                        servo_angles_target = calculate_inverse_kinematics(x, y, z, False, False)
+                        commands.append(servo_angles_target)
+                        commands.append(settings.all_angles_sent_message)
+                        for seq in commands:
+                            if seq == settings.all_angles_sent_message:
                                 print(f"seq = {seq}")
                                 send_move_to_arduino(seq, move_timeout, False)
                             else:
@@ -375,13 +384,12 @@ if __name__ == '__main__':
                             arduino.flush()
                 elif input_move[0].isdigit():
                     send_move_to_arduino(input_move.strip().split(" "), move_timeout, False)
-                    # send_move_to_arduino("ALL_ANGLES_SENT", move_timeout, False)
 
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Eroare: {e}")
 
     else:
-        print("Game Started")
+        print("Jocul a inceput")
         debug = True
         while True:
             raw = arduino.readline()
@@ -408,9 +416,9 @@ if __name__ == '__main__':
                     mv = chess.Move(src_sqs[0], dst_sqs[0])
                     if mv in board.legal_moves:
                         board.push(mv)
-                        print("Move: ", mv.uci())
+                        print("Mutare: ", mv.uci())
                     else:
-                        print("Illegal move detected:", mv)
+                        print("Mutare ilegala detectata:", mv)
                 elif len(src_sqs) == 1 and len(dst_sqs) == 0:
                     sq = src_sqs[0]
                     piece = board.piece_at(sq)
@@ -418,47 +426,47 @@ if __name__ == '__main__':
                         waiting_for_capture = True
                         capture_sq = sq
                         arduino.reset_input_buffer()
-                        arduino.write("CAPTURE_DETECTED\n".encode())
+                        arduino.write(settings.capture_detected_message.encode())
                         arduino.flush()
-                        print("Capture detected at", chess.square_name(sq),
-                              "— waiting for the white arrival move")
+                        print("Capturare detectata la ", chess.square_name(sq),
+                              " — se asteapta mutarea albului ce completeaza capturarea")
                         prev_occ = occ.copy()
             else:
                 if len(src_sqs) == 1 and len(dst_sqs) == 1 and dst_sqs[0] == capture_sq:
                     mv = chess.Move(src_sqs[0], dst_sqs[0])
                     if mv in board.legal_moves:
                         board.push(mv)
-                        print("Capture completed:", mv.uci())
+                        print("Capturare completata:", mv.uci())
                     else:
-                        print("Illegal post‐capture move:", mv)
+                        print("Mutare post‐capturare:", mv)
                     waiting_for_capture = False
                     capture_sq = None
                 else:
-                    print("The player was supposed to move a piece on the square where the captured piece was, but did not, which is illegal.")
+                    print("Jucatirul ar fi trebuit sa mute piesa alba ce captureaza piesa neagra selectata.")
 
             # AI logic
             print(f"board: \n{board}")
             if not waiting_for_capture:
                 if board.is_checkmate():
-                    winner = "Black" if board.turn == chess.WHITE else "White"
-                    print("Checkmate!", winner, "wins.")
+                    winner = "Negru" if board.turn == chess.WHITE else "Alb"
+                    print("Sah mat!", winner, "castiga.")
                     break
                 if board.is_stalemate():
-                    print("Stalemate!")
+                    print("Remiza!")
                     break
                 if board.is_insufficient_material():
-                    print("Draw by insufficient material.")
+                    print("Remiza pentru material insuficient.")
                     break
 
                 prev_occ = occ
                 board.turn = chess.BLACK
-                move = decide_move(board, "NM")
-                print(f"AI plays: {move}")
+                move = decide_move(board, settings.ai_type)
+                print(f"AI joaca: {move}")
                 is_capture = board.is_capture(move)
                 board.push(move)
                 prev_occ[move.from_square // 8][move.from_square % 8] = 0
                 prev_occ[move.to_square // 8][move.to_square % 8] = 1
-                print(f"board: \n{board}")
+                print(f"Tabla: \n{board}")
 
                 commands = []
                 if is_capture:
@@ -466,10 +474,10 @@ if __name__ == '__main__':
                     commands.extend(removal_seq)
 
                 commands.extend(map_move_to_angles(move))
-                commands.append("ALL_ANGLES_SENT")
+                commands.append(settings.all_angles_sent_message)
 
                 for seq in commands:
-                    if seq == "ALL_ANGLES_SENT":
+                    if seq == settings.all_angles_sent_message:
                         print(f"seq = {seq}")
                         send_move_to_arduino(seq, move_timeout, False)
                     else:
@@ -478,12 +486,15 @@ if __name__ == '__main__':
                     arduino.flush()
 
                 if board.is_checkmate():
-                    winner = "Black" if board.turn == chess.WHITE else "White"
-                    print("Checkmate!", winner, "wins.")
+                    winner = "Negru" if board.turn == chess.WHITE else "Alb"
+                    print("Sah mat!", winner, "castiga.")
                     break
                 if board.is_stalemate():
-                    print("Stalemate!")
+                    print("Remiza!")
                     break
                 if board.is_insufficient_material():
-                    print("Draw by insufficient material.")
+                    print("Remiza pentru material insuficient.")
                     break
+
+# TODO: ne asiguram ca toate patratelele sunt "atinse" cum trebuie
+# TODO: modalitate a bratului de a arata ca a castigat/pierdut/facut remiza

@@ -1,5 +1,5 @@
 import random
-import settings
+import kr_settings as settings
 
 def find_random_move(valid_moves):
     return random.choice(valid_moves)
@@ -30,7 +30,6 @@ def find_minimax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, max
                     next_move = move
             game_state.undo_move()
 
-            # Pruning
             alpha = max(alpha, max_score)
             if beta <= alpha:
                 break
@@ -48,7 +47,6 @@ def find_minimax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, max
                     next_move = move
             game_state.undo_move()
 
-            # Pruning
             beta = min(beta, min_score)
             if beta <= alpha:
                 break
@@ -58,9 +56,9 @@ def find_minimax_move_alphabeta(game_state, valid_moves, depth, alpha, beta, max
 def score_board(game_state):
     if game_state.checkmate:
         if game_state.white_to_move:
-            return -settings.checkmate_points  # Black wins
+            return -settings.checkmate_points
         else:
-            return settings.checkmate_points  # White wins
+            return settings.checkmate_points
     elif game_state.stalemate:
         return settings.stalemate_points
 

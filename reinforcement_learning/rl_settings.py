@@ -10,7 +10,6 @@ batch_size = 2**12
 n_steps = 2**13
 num_envs = 2**3
 
-
 # will only use for demonstration of optimization and data collection
 model_with_pretraining_file_path = "chess_model_with_pretraining.zip"
 model_without_pretraining_file_path = "chess_model_without_pretraining.zip"

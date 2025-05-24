@@ -6,41 +6,37 @@ import chess_engine
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from chess_env import ChessEnv
-import settings
+import reinforcement_learning.rl_settings as settings
 
 model = PPO.load(settings.best_model_path) if os.path.exists(settings.best_model_path) else PPO.load(settings.reinforced_model_path)
 
-# Initialize the Chess environment (for AI)
 env = DummyVecEnv([lambda: ChessEnv()])
 
-# Player settings. Turn player_one to True to play as white and/or player_two to True to play black.
-player_one = True  # If the AI is playing white, then False
-player_two = False  # Same as above but for black
+player_one = True
+player_two = False
 
-p.init()  # Initialize pygame
+p.init()
 
-board_width = board_height = 680  # Can switch to 512 if screen is too big
-dimension = 8  # Dimensions of a chess board are 8x8
+board_width = board_height = 680
+dimension = 8
 sq_size = board_height // dimension
-max_fps = 15  # For animations
+max_fps = 15
 images = {}
-colours = [p.Color('#EBEBD0'), p.Color('#769455')]  # Board colours
+colours = [p.Color('#EBEBD0'), p.Color('#769455')]
 
-# Move log specifications
-move_log_panel_width = 210  # May want to adjust this if the board_width/board_height is changed.
+
+move_log_panel_width = 210
 move_log_panel_height = board_height
 
 
 def draw_game_state(screen, game_state, square_selected, move_log_font):
-    """Responsible for all graphics within a current game state"""
-    draw_board(screen)  # Draws squares on the board
-    highlight_squares(screen, game_state, square_selected)  # Adds highlighting
-    draw_pieces(screen, game_state.board)  # Draws pieces on the board
-    draw_move_log(screen, game_state, move_log_font)  # Draws the move log
+    draw_board(screen)
+    highlight_squares(screen, game_state, square_selected)
+    draw_pieces(screen, game_state.board)
+    draw_move_log(screen, game_state, move_log_font)
 
 
 def draw_board(screen):
-    """Draw squares on the board using a chess.com colouring pattern"""
     for row in range(dimension):
         for column in range(dimension):
             colour = colours[((row + column) % 2)]
@@ -48,17 +44,14 @@ def draw_board(screen):
 
 
 def highlight_squares(screen, game_state, square_selected):
-    """Highlights square selected and last move made"""
-    # Highlights selected square
     if square_selected != ():
         row, column = square_selected
         if game_state.board[row][column][0] == ('w' if game_state.white_to_move else 'b'):  # Clicks on own piece
             s = p.Surface((sq_size, sq_size))
-            s.set_alpha(70)  # Transperancy value; 0 transparent; 255 opaque
+            s.set_alpha(70)
             s.fill(p.Color('yellow'))
             screen.blit(s, (column * sq_size, row * sq_size))
 
-    # Highlights last move
     if len(game_state.move_log) != 0:
         last_move = game_state.move_log[-1]
         start_row, start_column = last_move.start_row, last_move.start_column
@@ -71,7 +64,6 @@ def highlight_squares(screen, game_state, square_selected):
 
 
 def draw_pieces(screen, board):
-    """Draws pieces on the board using the current GameState.board"""
     for row in range(dimension):
         for column in range(dimension):
             piece = board[row][column]
@@ -80,14 +72,13 @@ def draw_pieces(screen, board):
 
 
 def draw_move_log(screen, game_state, font):
-    """Draws move log to the right of the screen"""
     move_log_area = p.Rect(board_width, 0, move_log_panel_width, move_log_panel_height)
     p.draw.rect(screen, p.Color('#2d2d2e'), move_log_area)
     move_log = game_state.move_log
     move_texts = []
     for i in range(0, len(move_log), 2):
         move_string = f'{i // 2 + 1}. {str(move_log[i])} '
-        if i + 1 < len(move_log):  # Makes sure black has made a move
+        if i + 1 < len(move_log):
             move_string += f'{str(move_log[i + 1])} '
         move_texts.append(move_string)
 
@@ -107,38 +98,32 @@ def draw_move_log(screen, game_state, font):
 
 
 def animate_move(move, screen, board, clock):
-    """Animates a move"""
-    delta_row = move.end_row - move.start_row  # Change in row
-    delta_column = move.end_column - move.start_column  # Change in column
-    frames_per_square = 5  # Controls animation speed (frames to move one square)
+    delta_row = move.end_row - move.start_row
+    delta_column = move.end_column - move.start_column
+    frames_per_square = 5
     frame_count = (abs(delta_row) + abs(delta_column)) * frames_per_square
 
-    for frame in range(frame_count + 1):  # Need +1 to complete the entire animation
+    for frame in range(frame_count + 1):
 
-        #  Frame/frame_count indicates how far along the action is
         row, column = (move.start_row + delta_row*frame/frame_count, move.start_column + delta_column*frame/frame_count)
 
-        # Draw board and pieces for each frame of the animation
         draw_board(screen)
         draw_pieces(screen, board)
 
-        # Erases the piece from its ending square
         colour = colours[(move.end_row + move.end_column) % 2]
         end_square = p.Rect(move.end_column * sq_size, move.end_row * sq_size, sq_size, sq_size)
         p.draw.rect(screen, colour, end_square)
 
-        # Draws a captured piece onto the rectangle if a piece is captured
         if move.piece_captured != '--':
             if move.is_en_passant_move:
                 en_passant_row = move.end_row + 1 if move.piece_captured[0] == 'b' else move.end_row - 1
                 end_square = p.Rect(move.end_column * sq_size, en_passant_row * sq_size, sq_size, sq_size)
             screen.blit(images[move.piece_captured], end_square)
 
-        # Draws moving piece
         screen.blit(images[move.piece_moved], p.Rect(column * sq_size, row * sq_size, sq_size, sq_size))
 
         p.display.flip()
-        clock.tick(60)  # Controls fame rate per second for the animation
+        clock.tick(60)
 
 
 def draw_endgame_text(screen, text):
@@ -148,13 +133,11 @@ def draw_endgame_text(screen, text):
                                                                  board_height/2 - text_object.get_height()/2)
     screen.blit(text_object, text_location)
 
-    # Creates a shadowing effect
     text_object = font.render(text, True, p.Color('black'))
     screen.blit(text_object, text_location.move(2, 2))
 
 
 def load_images():
-    """Initialize a global dictionary of images"""
     pieces = ['bR', 'bN', 'bB', 'bQ', 'bK', 'bB', 'bN', 'bR', 'bP',
               'wR', 'wN', 'wB', 'wQ', 'wK', 'wB', 'wN', 'wR', 'wP']
     for piece in pieces:
@@ -221,7 +204,6 @@ if __name__ == '__main__':
                     animate = False
                     game_over = False
 
-        # AI move finder
         if not game_over and not human_turn:
             env.envs[0].set_state(game_state.board)
 
@@ -229,13 +211,10 @@ if __name__ == '__main__':
 
             action, _states = model.predict(obs, deterministic=True)
 
-            # Get the list of valid moves
             valid_moves = game_state.get_valid_moves()
 
-            # Map the AI's action to a valid move
             AI_move = valid_moves[action % len(valid_moves)]  # Ensure action maps to a valid move
 
-            # Make the AI's move
             game_state.make_move(AI_move)
             move_made = True
             animate = True

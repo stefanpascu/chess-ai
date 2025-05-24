@@ -1,7 +1,7 @@
 import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Debug GPU errors
-os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"  # Deterministic behavior
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
 
 import datetime
 from stable_baselines3 import PPO
@@ -10,7 +10,7 @@ from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback,
 from stable_baselines3.common.logger import configure
 from chess_env import ChessEnv
 import torch
-import settings
+import rl_settings as settings
 import torch.nn as nn
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
@@ -46,7 +46,6 @@ def make_chess_env():
 
 
 def evaluate_models(new_model, best_model, num_games=10):
-    """Play games between the new and best models to evaluate their performance."""
     wins, losses, draws = 0, 0, 0
     env = ChessEnv(reward_scaling_factor=0.01)  # Single-instance environment for evaluation
 
@@ -54,14 +53,12 @@ def evaluate_models(new_model, best_model, num_games=10):
         env.reset()
         done = False
         while not done:
-            # Alternate between the models
             if env.board.turn:
                 action, _ = best_model.predict(env.get_observation(), deterministic=True)
             else:
                 action, _ = new_model.predict(env.get_observation(), deterministic=True)
             _, reward, done, _, _ = env.step(action)
 
-        # Update scores based on game result
         if reward > 0:
             wins += 1
         elif reward < 0:
@@ -87,10 +84,9 @@ if __name__ == "__main__":
     }
 
     model_path = settings.reinforced_model_path
-    best_model_path = settings.best_model_path  # Path to save the best model
+    best_model_path = settings.best_model_path
     total_timesteps = settings.training_number_of_timestamps
 
-    # Load the best model or initialize a new one
     if os.path.exists(best_model_path):
         print(f"Loading best model from {best_model_path}...")
         best_model = PPO.load(
@@ -114,7 +110,6 @@ if __name__ == "__main__":
             device=device,
         )
 
-    # Initialize or load the current model
     if os.path.exists(model_path):
         print(f"Loading current model from {model_path}...")
         model = PPO.load(
@@ -140,7 +135,6 @@ if __name__ == "__main__":
             device=device,
         )
 
-    # Configure logger
     logger = configure("logs/", ["tensorboard"])
     model.set_logger(logger)
 
@@ -159,7 +153,6 @@ if __name__ == "__main__":
         name_prefix="chess_model_checkpoint",
     )
 
-    # Start training
     if model.policy.device:
         print(f"Model device: {torch.cuda.get_device_name(0)}")
     else:
@@ -168,18 +161,15 @@ if __name__ == "__main__":
     print(f"Training started at {start_time}...")
 
     while True:
-        # Train for a chunk of timesteps
         model.learn(
             total_timesteps=total_timesteps,  # Train in chunks of 200,000 timesteps
             callback=[eval_callback, checkpoint_callback],
         )
 
-        # Evaluate the new model against the best
         print("Evaluating the new model against the best model...")
         wins, losses, draws = evaluate_models(model, best_model, num_games=100)
         print(f"Evaluation results: {wins} Wins, {losses} Losses, {draws} Draws")
 
-        # Replace the best model if the new model performs better
         if wins > losses:
             print("New model outperformed the best model. Updating the best model...")
             model.save(best_model_path)
@@ -187,7 +177,6 @@ if __name__ == "__main__":
         else:
             print("Best model retained.")
 
-        # Save the current model
         model.save(model_path)
         vec_env.save(settings.normalized_env_path)
 
