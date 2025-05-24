@@ -48,10 +48,10 @@ def lay_piece(x, y, z):
     angles.append(servo_angles_target)
     if int(y) != settings.second_line_y_in_cm:
         servo_angles_target = calculate_inverse_kinematics(x, y, z + settings.lift_piece_height,
-                                                           True, False)
+                                                           False, False)
     else:
         servo_angles_target = calculate_inverse_kinematics(x, y, z,
-                                                           True, False)
+                                                           False, False)
     angles.append(servo_angles_target)
 
     angles.append(settings.initial_stance_not_grabbing)
@@ -108,6 +108,24 @@ def map_capture_removal_to_robot_arm(move):
     angles.append(settings.captured_piece_dropping_point_closed)
     angles.append(settings.captured_piece_dropping_point_open)
     angles.append(settings.initial_stance_not_grabbing)
+
+    return angles
+
+
+def map_castling_to_robot_arm(move):
+    target_square = move.to_square
+    angles = []
+
+    if target_square == chess.G8:
+        target_x, target_y, target_z = get_square_center(chess.H8, False)
+        angles = pick_piece(target_x, target_y, target_z)
+        target_x, target_y, target_z = get_square_center(chess.F8, False)
+        angles.extend(lay_piece(target_x, target_y, target_z))
+    elif target_square == chess.C8:
+        target_x, target_y, target_z = get_square_center(chess.A8, False)
+        angles = pick_piece(target_x, target_y, target_z)
+        target_x, target_y, target_z = get_square_center(chess.D8, False)
+        angles.extend(lay_piece(target_x, target_y, target_z))
 
     return angles
 
@@ -345,7 +363,24 @@ if __name__ == '__main__':
                 print(board, "\n")
                 input_move = input("Introduceti mutarea:\n")
                 if input_move[0].isalpha():
-                    if input_move == "init":
+                    if input_move == "fin":
+                        cm_fen = "7k/6Q1/5K2/8/8/8/8/8 b - - 0 1"
+                        board.set_fen(cm_fen)
+                        # print(board)
+                        if board.is_checkmate():
+                            winner = "Negru" if board.turn == chess.WHITE else "Alb"
+                            print("Sah mat!", winner, " castiga.")
+                            arduino.write(("DEFEAT\n" if board.turn == chess.WHITE else "WIN\n").encode())
+                            break
+                        if board.is_stalemate():
+                            print("Remiza!")
+                            arduino.write("STALEMATE\n".encode())
+                            break
+                        if board.is_insufficient_material():
+                            print("Remiza pentru material insuficient.")
+                            arduino.write("STALEMATE\n".encode())
+                            break
+                    elif input_move == "init":
                         send_move_to_arduino([90, 90, 90, 123, 0, 20], move_timeout, False)
                     elif len(input_move) == 4:
                         move = chess.Move.from_uci(input_move)
@@ -401,7 +436,6 @@ if __name__ == '__main__':
                 continue
 
             src_sqs, dst_sqs = diff_squares(prev_occ, occ)
-
             board.turn = chess.WHITE
 
             # Player logic
@@ -449,13 +483,16 @@ if __name__ == '__main__':
             if not waiting_for_capture:
                 if board.is_checkmate():
                     winner = "Negru" if board.turn == chess.WHITE else "Alb"
-                    print("Sah mat!", winner, "castiga.")
+                    print("Sah mat!", winner, " castiga.")
+                    arduino.write(("DEFEAT\n" if board.turn == chess.WHITE else "WIN\n").encode())
                     break
                 if board.is_stalemate():
                     print("Remiza!")
+                    arduino.write("STALEMATE\n".encode())
                     break
                 if board.is_insufficient_material():
                     print("Remiza pentru material insuficient.")
+                    arduino.write("STALEMATE\n".encode())
                     break
 
                 prev_occ = occ
@@ -463,12 +500,22 @@ if __name__ == '__main__':
                 move = decide_move(board, settings.ai_type)
                 print(f"AI joaca: {move}")
                 is_capture = board.is_capture(move)
+                is_castling = board.is_castling(move)
                 board.push(move)
                 prev_occ[move.from_square // 8][move.from_square % 8] = 0
                 prev_occ[move.to_square // 8][move.to_square % 8] = 1
                 print(f"Tabla: \n{board}")
 
                 commands = []
+                if is_castling:
+                    removal_seq = map_castling_to_robot_arm(move)
+                    commands.extend(removal_seq)
+                    if move.to_square == chess.G8:
+                        prev_occ[chess.H8 // 8][chess.H8 % 8] = 0
+                        prev_occ[chess.F8 // 8][chess.F8 % 8] = 1
+                    elif move.to_square == chess.C8:
+                        prev_occ[chess.A8 // 8][chess.A8 % 8] = 0
+                        prev_occ[chess.D8 // 8][chess.D8 % 8] = 1
                 if is_capture:
                     removal_seq = map_capture_removal_to_robot_arm(move)
                     commands.extend(removal_seq)
@@ -487,13 +534,16 @@ if __name__ == '__main__':
 
                 if board.is_checkmate():
                     winner = "Negru" if board.turn == chess.WHITE else "Alb"
-                    print("Sah mat!", winner, "castiga.")
+                    print("Sah mat!", winner, " castiga.")
+                    arduino.write(("DEFEAT\n" if board.turn == chess.WHITE else "WIN\n").encode())
                     break
                 if board.is_stalemate():
                     print("Remiza!")
+                    arduino.write("STALEMATE\n".encode())
                     break
                 if board.is_insufficient_material():
                     print("Remiza pentru material insuficient.")
+                    arduino.write("STALEMATE\n".encode())
                     break
 
 # TODO: ne asiguram ca toate patratelele sunt "atinse" cum trebuie

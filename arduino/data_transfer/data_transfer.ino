@@ -109,12 +109,55 @@ void ai_flow() {
         break;
       } else if (cmd.startsWith("C")) {
         break;
+      } else if (cmd.startsWith("W")){
+        player_win();
+      } else if (cmd.startsWith("D")){
+        player_defeat();
+      } else if (cmd.startsWith("S")){
+        player_stalemate();
       } else {
         parseAndSetTargets(cmd);
         smoothMoveSequential();
         Serial.println("MOVE_DONE");
       }
     }
+}
+
+void player_win() {
+  for(int i = 0; i < 5; i++) {
+    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(RED_LED,   LOW);
+    delay(1000);
+    digitalWrite(GREEN_LED, LOW);
+    digitalWrite(RED_LED,   LOW);
+    delay(1000);
+  }
+  digitalWrite(GREEN_LED, HIGH);
+}
+
+void player_defeat() {
+  for(int i = 0; i < 5; i++) {
+    digitalWrite(GREEN_LED, LOW);
+    digitalWrite(RED_LED,   HIGH);
+    delay(1000);
+    digitalWrite(GREEN_LED, LOW);
+    digitalWrite(RED_LED,   LOW);
+    delay(1000);
+  }
+  digitalWrite(RED_LED,   HIGH);
+}
+
+void player_stalemate() {
+  for(int i = 0; i < 5; i++) {
+    digitalWrite(GREEN_LED, LOW);
+    digitalWrite(RED_LED,   HIGH);
+    delay(1000);
+    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(RED_LED,   LOW);
+    delay(1000);
+  }
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(RED_LED,   LOW);
 }
 
 String waitForResponse() {
