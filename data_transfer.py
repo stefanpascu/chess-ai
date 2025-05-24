@@ -338,9 +338,9 @@ def send_move_to_arduino(servo_angles, timeout=15.0, debug=False):
         if arduino.in_waiting:
             line = arduino.readline().decode('utf-8', 'ignore').strip()
             if debug:
-                print("⟵ Arduino:", repr(line))
+                print("<- Arduino:", repr(line))
             if line == settings.all_servos_done_message:
-                print("⚙️  Bratul a terminat mutarea.")
+                print("-> Bratul a terminat mutarea.")
                 return
             if line == "MOVE_DONE":
                 return
@@ -437,16 +437,34 @@ if __name__ == '__main__':
 
             src_sqs, dst_sqs = diff_squares(prev_occ, occ)
             board.turn = chess.WHITE
-
-            # Player logic
             if not waiting_for_capture:
                 if debug:
                     print(f"src_sqs: {src_sqs}")
                     print(f"dst_sqs: {dst_sqs}")
                     print(f"len(src_sqs): {len(src_sqs)}")
                     print(f"len(dst_sqs): {len(dst_sqs)}")
-
-                if len(src_sqs) == 1 and len(dst_sqs) == 1:
+                if len(src_sqs) == 2 and len(dst_sqs) == 2:
+                    king_from = next(s for s in src_sqs if board.piece_at(s).piece_type == chess.KING)
+                    king_to = next(d for d in dst_sqs if abs(chess.square_file(d) - chess.square_file(king_from)) == 2)
+                    mv = chess.Move(king_from, king_to)
+                    if mv in board.legal_moves and board.is_castling(mv):
+                        board.push(mv)
+                        print("Castling move:", mv.uci())
+                        if king_to == chess.G1:
+                            prev_occ[chess.H1 // 8][chess.H1 % 8] = 0
+                            prev_occ[chess.F1 // 8][chess.F1 % 8] = 1
+                        elif king_to == chess.C1:
+                            prev_occ[chess.A1 // 8][chess.A1 % 8] = 0
+                            prev_occ[chess.D1 // 8][chess.D1 % 8] = 1
+                        elif king_to == chess.G8:
+                            prev_occ[chess.H8 // 8][chess.H8 % 8] = 0
+                            prev_occ[chess.F8 // 8][chess.F8 % 8] = 1
+                        elif king_to == chess.C8:
+                            prev_occ[chess.A8 // 8][chess.A8 % 8] = 0
+                            prev_occ[chess.D8 // 8][chess.D8 % 8] = 1
+                    else:
+                        print("Illegal castling detected:", mv)
+                elif len(src_sqs) == 1 and len(dst_sqs) == 1:
                     mv = chess.Move(src_sqs[0], dst_sqs[0])
                     if mv in board.legal_moves:
                         board.push(mv)
