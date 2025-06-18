@@ -1,6 +1,7 @@
 import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
+import numpy as np
 import pygame as p
 import chess_engine
 from stable_baselines3 import PPO
@@ -8,7 +9,8 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from chess_env import ChessEnv
 import reinforcement_learning.rl_settings as settings
 
-model = PPO.load(settings.best_model_path) if os.path.exists(settings.best_model_path) else PPO.load(settings.reinforced_model_path)
+# model = PPO.load(settings.best_model_path) if os.path.exists(settings.best_model_path) else PPO.load(settings.reinforced_model_path)
+model = PPO.load(settings.best_model_path)
 
 env = DummyVecEnv([lambda: ChessEnv()])
 
@@ -205,15 +207,22 @@ if __name__ == '__main__':
                     game_over = False
 
         if not game_over and not human_turn:
-            env.envs[0].set_state(game_state.board)
-
+            # 1) grab the raw (12×8×8) observation
             obs = env.envs[0].get_observation()
 
-            action, _states = model.predict(obs, deterministic=True)
+            # 2) flip it vertically so that rank-8 maps to row 0 in Pygame
+            obs = np.flip(obs, axis=1)
 
+            # 3) add the batch dimension for SB3 VecEnv
+            obs = obs[np.newaxis, ...]  # now shape (1, 12, 8, 8)
+
+            # 4) predict (returns array of shape (1,))
+            action_arr, _states = model.predict(obs, deterministic=True)
+            action_idx = int(action_arr[0])  # extract the Python int
+
+            # 5) map into your valid‐moves list
             valid_moves = game_state.get_valid_moves()
-
-            AI_move = valid_moves[action % len(valid_moves)]  # Ensure action maps to a valid move
+            AI_move = valid_moves[action_idx % len(valid_moves)]
 
             game_state.make_move(AI_move)
             move_made = True

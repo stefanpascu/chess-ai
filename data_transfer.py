@@ -46,7 +46,9 @@ def lay_piece(x, y, z):
 
     servo_angles_target = calculate_inverse_kinematics(x, y, z, False, False)
     angles.append(servo_angles_target)
-    if int(y) != settings.second_line_y_in_cm:
+    if (int(y) != settings.second_line_y_in_cm
+            and not (int(y) == settings.third_line_y_in_cm and int(x) == settings.first_column_x_in_cm)
+            and not (int(y) == settings.third_line_y_in_cm and int(x) == -settings.first_column_x_in_cm)):
         servo_angles_target = calculate_inverse_kinematics(x, y, z + settings.lift_piece_height,
                                                            False, False)
     else:
@@ -73,7 +75,9 @@ def pick_piece(x, y, z):
 
     servo_angles_target = calculate_inverse_kinematics(x, y, z, True, False)
     angles.append(servo_angles_target)
-    if int(y) != settings.second_line_y_in_cm:
+    if (int(y) != settings.second_line_y_in_cm
+            and not (int(y) == settings.third_line_y_in_cm and int(x) == settings.first_column_x_in_cm)
+            and not (int(y) == settings.third_line_y_in_cm and int(x) == -settings.first_column_x_in_cm)):
         servo_angles_target = calculate_inverse_kinematics(x, y, z + settings.lift_piece_height,
                                                                               True, False)
     else:
@@ -366,7 +370,6 @@ if __name__ == '__main__':
                     if input_move == "fin":
                         cm_fen = "7k/6Q1/5K2/8/8/8/8/8 b - - 0 1"
                         board.set_fen(cm_fen)
-                        # print(board)
                         if board.is_checkmate():
                             winner = "Negru" if board.turn == chess.WHITE else "Alb"
                             print("Sah mat!", winner, " castiga.")
