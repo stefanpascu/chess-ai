@@ -204,8 +204,9 @@ def calculate_inverse_kinematics(x, y, z, is_grabbing, debug=False):
         print("l: ", l)
         print("h: ", h)
 
-    servo0 = b * settings.base_servo_error_exponent
+    servo0 = b * settings.base_servo_error_exponent - settings.horizontal_base_error
     servo3 = settings.wrist_sideways_angle
+    servo4 = servo4 + settings.vertical_wrist_error
     servo5 = settings.claw_closed if is_grabbing else settings.claw_open
 
     servos = [
